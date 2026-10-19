@@ -2,6 +2,7 @@ import { Agent } from 'undici';
 import db from '../models/index.js';
 import { log } from './Logger.js';
 import { broadcast, onTopicSubscribers, subscriberCount, TOPICS } from './events.js';
+import { publishHealthChange } from '../controllers/HealthController.js';
 
 const { server: ServerModel } = db;
 
@@ -252,6 +253,7 @@ onTopicSubscribers((topic, count) => {
 const notifyServersUpdated = () => {
   broadcast('hosts', 'servers-updated', {});
   sweep();
+  publishHealthChange();
 };
 
 export { ensureAgentRelays, notifyServersUpdated };

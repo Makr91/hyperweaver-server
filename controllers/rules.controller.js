@@ -1,0 +1,34 @@
+import { getRulesDocument } from '../utils/rules.js';
+
+/**
+ * @swagger
+ * /api/rules:
+ *   get:
+ *     summary: The validation rules of every form this host has a route for (public)
+ *     description: One JSON Schema 2020-12 document. $defs carries the estate's named patterns and every pattern a form uses is a $ref into it, except the inline \S pattern every required string member carries beside minLength 1 so a blank string is refused as nonBlank; forms carries one object schema per form this host has a route for, its properties the members of the request body the route reads, in snake_case. The password minimum is the host's authentication.local_password_min_length. A property carrying unique names the scope its value must not already exist in; only the route decides it and answers 409.
+ *     tags: [Health]
+ *     responses:
+ *       200:
+ *         description: The rules document
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               required: [$schema, $defs, forms]
+ *               properties:
+ *                 $schema:
+ *                   type: string
+ *                   example: https://json-schema.org/draft/2020-12/schema
+ *                 $defs:
+ *                   type: object
+ *                   description: The named patterns every host shares
+ *                 forms:
+ *                   type: object
+ *                   description: One object schema per form, keyed login, register, displayName, profile, password, email, organization, invitation
+ */
+const getRules = (req, res) => {
+  void req;
+  return res.json(getRulesDocument());
+};
+
+export { getRules };

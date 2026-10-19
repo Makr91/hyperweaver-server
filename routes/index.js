@@ -14,6 +14,9 @@ import ServerController from '../controllers/ServerController.js';
 import StatusController from '../controllers/StatusController.js';
 import { signin, exchange, refreshToken, oidcLogout } from '../controllers/auth/signin.js';
 import { getUserProfile } from '../controllers/user/getuserprofile.js';
+import { getHealth } from '../controllers/HealthController.js';
+import { getRules } from '../controllers/rules.controller.js';
+import { reportClientErrors } from '../controllers/client_errors/report.js';
 import { updatePreferences } from '../controllers/user/preferences.js';
 import * as FavoritesController from '../controllers/FavoritesController.js';
 import ConfigController from '../controllers/ConfigController.js';
@@ -394,16 +397,11 @@ router.get('/api/status', standardLimiter, StatusController.getServerStatus);
 
 router.get('/api/config/ticket', standardLimiter, ConfigController.getTicketConfig);
 
-router.get('/api/health', standardLimiter, (req, res) => {
-  void req;
-  res.json({
-    success: true,
-    status: 'healthy',
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
-    version: process.env.npm_package_version || 'unknown',
-  });
-});
+router.get('/api/health', standardLimiter, getHealth);
+
+router.get('/api/rules', standardLimiter, getRules);
+
+router.post('/api/client-errors', standardLimiter, reportClientErrors);
 
 /**
  * Docs ship inside the Hyperweaver UI artifact (as ui/docs) and are served by the root

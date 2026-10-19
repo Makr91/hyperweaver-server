@@ -151,6 +151,8 @@ export const attachServerRequestMethods = Server => {
       if (changed) {
         broadcast('hosts', 'servers-updated', {});
       }
+      const { publishHealthChange } = await import('../controllers/HealthController.js');
+      publishHealthChange();
     }
     return result;
   };
