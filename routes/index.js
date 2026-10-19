@@ -1,5 +1,4 @@
 import express from 'express';
-import path from 'path';
 import { authenticate, optionalAuth, requireAdmin, requireSuperAdmin } from '../auth/auth.js';
 import AuthController from '../controllers/AuthController.js';
 import RegistrationController from '../controllers/RegistrationController.js';
@@ -383,13 +382,6 @@ router.use('/docs', staticFileLimiter, (req, res) => {
     details:
       'The docs site is bundled into the Hyperweaver UI artifact (ui/docs) at UI build time; serve a UI artifact that includes it (hyperweaverUiVersion >= 0.10.5).',
   });
-});
-
-router.use('/ui', staticFileLimiter, express.static(path.join(process.cwd(), 'ui')));
-
-router.get('/ui/*splat', staticFileLimiter, (req, res) => {
-  void req;
-  res.sendFile(path.join(process.cwd(), 'ui/index.html'));
 });
 
 export default router;

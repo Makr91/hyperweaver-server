@@ -148,6 +148,7 @@ class StatusController {
    */
   static getServerStatus(req, res) {
     void req;
+    res.vary('Origin');
     const { authentication } = loadConfig('auth');
     const { branding } = loadConfig('app');
     const payload = { ...STATUS, features: featuresOf(authentication) };

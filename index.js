@@ -2,6 +2,7 @@ import express from 'express';
 import https from 'https';
 import http from 'http';
 import fs from 'fs';
+import { basename } from 'path';
 import crypto from 'crypto';
 import { setTimeout as delay } from 'timers/promises';
 import cors from 'cors';
@@ -26,6 +27,7 @@ import favoritesRoutes from './routes/favorites.routes.js';
 import notificationRoutes from './routes/notification.routes.js';
 import searchRoutes from './routes/search.routes.js';
 import { opensearch } from './controllers/opensearch.controller.js';
+import { uiIndex, uiManifest } from './middleware/uiIndex.js';
 import { handleWebSocketUpgrade } from './utils/wsProxy.js';
 import { generateSSLCertificatesIfNeeded } from './utils/sslSetup.js';
 import { csrfProtection } from './auth/csrfProtection.js';
@@ -92,8 +94,18 @@ const { jwt_secret: jwtSecret } = loadConfig('auth').authentication;
 const app = express();
 const { port } = appConfig.server;
 
+const CATALOG_ORIGIN = 'https://provisioner-catalog.startcloud.com';
+
 const corsOptions = {
-  origin: appConfig.security.cors.whitelist,
+  origin: [
+    new URL(appConfig.frontend.frontend_url).origin,
+    ...appConfig.security.cors.whitelist,
+    CATALOG_ORIGIN,
+  ],
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['x-access-token', 'Authorization', 'Origin', 'Content-Type', 'Accept'],
+  exposedHeaders: ['X-Refreshed-Token'],
+  maxAge: 600,
   credentials: appConfig.security.cors.credentials,
 };
 
@@ -103,7 +115,22 @@ app.options('*splat', cors(corsOptions));
 app.use(i18nMiddleware);
 app.use(express.json({ limit: '50mb' }));
 
-app.use(express.static('./ui'));
+app.get('/index.html', staticFileLimiter, uiIndex(404));
+app.get('/callback/index.html', staticFileLimiter, uiIndex(404));
+app.get('/manifest.json', staticFileLimiter, uiManifest);
+app.get('/opensearch.xml', staticFileLimiter, opensearch);
+
+app.use(
+  express.static('./ui', {
+    index: false,
+    setHeaders: (res, filePath) => {
+      res.setHeader(
+        'Cache-Control',
+        basename(filePath) === 'index.html' ? 'no-store, no-transform' : 'no-cache'
+      );
+    },
+  })
+);
 
 const UserModel = db.user;
 
@@ -209,7 +236,6 @@ app.use('/api', eventsRoutes);
 app.use('/api', favoritesRoutes);
 app.use('/api', notificationRoutes);
 app.use('/api', searchRoutes);
-app.get('/opensearch.xml', staticFileLimiter, opensearch);
 app.use(router);
 
 app.use('/api-docs', swaggerUi.serve, (req, res, next) => {
@@ -325,10 +351,7 @@ app.get('/agent/api-docs/swagger.json', async (req, res) => {
   }
 });
 
-app.get('*splat', staticFileLimiter, (req, res) => {
-  void req;
-  res.sendFile('./ui/index.html', { root: '.' });
-});
+app.get('*splat', staticFileLimiter, uiIndex());
 
 app.use(errorHandler);
 
