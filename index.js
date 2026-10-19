@@ -22,6 +22,10 @@ import { log, createRequestLogger, generateRequestId } from './utils/Logger.js';
 import { configAwareI18nMiddleware as i18nMiddleware } from './config/i18n.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import eventsRoutes from './routes/events.routes.js';
+import favoritesRoutes from './routes/favorites.routes.js';
+import notificationRoutes from './routes/notification.routes.js';
+import searchRoutes from './routes/search.routes.js';
+import { opensearch } from './controllers/opensearch.controller.js';
 import { handleWebSocketUpgrade } from './utils/wsProxy.js';
 import { generateSSLCertificatesIfNeeded } from './utils/sslSetup.js';
 import { csrfProtection } from './auth/csrfProtection.js';
@@ -202,6 +206,10 @@ configEngineRoutes(
 );
 
 app.use('/api', eventsRoutes);
+app.use('/api', favoritesRoutes);
+app.use('/api', notificationRoutes);
+app.use('/api', searchRoutes);
+app.get('/opensearch.xml', staticFileLimiter, opensearch);
 app.use(router);
 
 app.use('/api-docs', swaggerUi.serve, (req, res, next) => {

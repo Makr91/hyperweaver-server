@@ -18,7 +18,6 @@ import { getHealth } from '../controllers/HealthController.js';
 import { getRules } from '../controllers/rules.controller.js';
 import { reportClientErrors } from '../controllers/client_errors/report.js';
 import { updatePreferences } from '../controllers/user/preferences.js';
-import * as FavoritesController from '../controllers/FavoritesController.js';
 import ConfigController from '../controllers/ConfigController.js';
 import { oidcTokenRefresh } from '../auth/oidcTokenRefresh.js';
 import { orgAuthorizeAgent } from '../utils/orgAccess.js';
@@ -88,39 +87,6 @@ router.delete(
 router.get('/api/auth/setup-status', standardLimiter, RegistrationController.checkSetupStatus);
 router.get('/api/auth/methods', standardLimiter, AuthController.getAuthMethods);
 
-/**
- * Favorites + OIDC userinfo claims (profile dropdown). The OIDC access token is read
- * server-side from req.session.oidc (never the app JWT, §4); oidcTokenRefresh refreshes it
- * when near expiry. authenticate first (valid app session), then the refresh middleware.
- */
-router.get(
-  '/api/userinfo/claims',
-  standardLimiter,
-  authenticate,
-  oidcTokenRefresh,
-  FavoritesController.getUserInfoClaims
-);
-router.get(
-  '/api/userinfo/favorites',
-  standardLimiter,
-  authenticate,
-  oidcTokenRefresh,
-  FavoritesController.getEnrichedFavorites
-);
-router.get(
-  '/api/favorites',
-  standardLimiter,
-  authenticate,
-  oidcTokenRefresh,
-  FavoritesController.getFavorites
-);
-router.post(
-  '/api/favorites/save',
-  standardLimiter,
-  authenticate,
-  oidcTokenRefresh,
-  FavoritesController.saveFavorites
-);
 router.post(
   '/api/auth/ldap/test',
   adminLimiter,
