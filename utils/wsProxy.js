@@ -82,7 +82,7 @@ const handleAgentWsUpgrade = async (id, backendPath, search, request, socket, he
     return;
   }
 
-  const backendUrl = `${server.protocol.replace('http', 'ws')}://${server.hostname}:${server.port}/${backendPath}${search}`;
+  const backendUrl = `${server.protocol.replace('http', 'ws')}://${server.hostname}:${server.port}/api/${backendPath}${search}`;
   log.websocket.info('WebSocket: connecting to agent backend', { ...logContext, backendUrl });
 
   await createSimpleWsProxy(
@@ -214,7 +214,7 @@ const handleAgentVncUpgrade = async (id, machineName, search, request, socket, h
     socket.destroy();
     return;
   }
-  const backendUrl = `${server.protocol.replace('http', 'ws')}://${server.hostname}:${server.port}/machines/${encodeURIComponent(machineName)}/vnc/websockify${search}`;
+  const backendUrl = `${server.protocol.replace('http', 'ws')}://${server.hostname}:${server.port}/api/machines/${encodeURIComponent(machineName)}/vnc/websockify${search}`;
   await createBinaryWsProxy(server, backendUrl, ['binary'], request, socket, head, {
     type: 'vnc',
     machineName,
@@ -234,7 +234,7 @@ const handleAgentRdpUpgrade = async (id, machineName, search, request, socket, h
     socket.destroy();
     return;
   }
-  const backendUrl = `${server.protocol.replace('http', 'ws')}://${server.hostname}:${server.port}/machines/${encodeURIComponent(machineName)}/rdp-bridge${search}`;
+  const backendUrl = `${server.protocol.replace('http', 'ws')}://${server.hostname}:${server.port}/api/machines/${encodeURIComponent(machineName)}/rdp-bridge${search}`;
   await createBinaryWsProxy(server, backendUrl, [], request, socket, head, {
     type: 'rdp-bridge',
     machineName,

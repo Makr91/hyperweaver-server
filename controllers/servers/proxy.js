@@ -39,7 +39,7 @@ export const getAgentById = async id => {
 export const proxyStreamingRequest = async (req, res, proxyConfig, streamConfig) => {
   const { cleanHeaders, hostname, port, protocol, path, startTime } = proxyConfig;
   const serverUrl = `${protocol}://${hostname}:${port}`;
-  const targetUrl = `${serverUrl}/${path}`;
+  const targetUrl = `${serverUrl}/api/${path}`;
 
   const { server } = proxyConfig;
   if (!server || !server.api_key) {

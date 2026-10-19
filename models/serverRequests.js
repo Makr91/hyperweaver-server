@@ -117,7 +117,7 @@ export const attachServerRequestMethods = Server => {
   Server.prototype.fetchStatus = async function (timeoutMs) {
     const serverUrl = this.getServerUrl();
     try {
-      const response = await axios.get(`${serverUrl}/status`, {
+      const response = await axios.get(`${serverUrl}/api/status`, {
         timeout: timeoutMs || loadConfig().agents.poll_timeout,
         httpsAgent: new https.Agent({
           rejectUnauthorized: !this.allow_insecure,
@@ -187,7 +187,7 @@ export const attachServerRequestMethods = Server => {
 
       const encodedPath = encodeFmriPath(path);
       const requestHeaders = buildRequestHeaders(this.api_key, options.headers);
-      const finalUrl = `${serverUrl}/${encodedPath}`;
+      const finalUrl = `${serverUrl}/api/${encodedPath}`;
 
       log.server.debug('Request details', {
         originalPath: path,
@@ -249,7 +249,7 @@ export const attachServerRequestMethods = Server => {
         duration: `${totalDuration}ms`,
         isTimeout: error.code === 'ECONNABORTED' || error.message.includes('timeout'),
         isNetworkError: error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND',
-        url: `${serverUrl}/${path}`,
+        url: `${serverUrl}/api/${path}`,
         method: options.method || 'GET',
         requestData: options.data,
       });
@@ -268,7 +268,7 @@ export const attachServerRequestMethods = Server => {
     try {
       const serverUrl = `${protocol}://${hostname}:${port}`;
 
-      const response = await axios.get(`${serverUrl}/stats`, {
+      const response = await axios.get(`${serverUrl}/api/stats`, {
         headers: {
           Authorization: `Bearer ${apiKey}`,
           'Content-Type': 'application/json',
@@ -300,7 +300,7 @@ export const attachServerRequestMethods = Server => {
    */
   Server.probeStatus = async function (hostname, port, protocol, allowInsecure = false) {
     try {
-      const response = await axios.get(`${protocol}://${hostname}:${port}/status`, {
+      const response = await axios.get(`${protocol}://${hostname}:${port}/api/status`, {
         timeout: 5000,
         httpsAgent: new https.Agent({
           rejectUnauthorized: !allowInsecure,
@@ -329,7 +329,7 @@ export const attachServerRequestMethods = Server => {
       const serverUrl = `${protocol}://${hostname}:${port}`;
 
       const response = await axios.post(
-        `${serverUrl}/api-keys/bootstrap`,
+        `${serverUrl}/api/api-keys/bootstrap`,
         {
           name: entityName,
         },
