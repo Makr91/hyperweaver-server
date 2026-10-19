@@ -80,7 +80,7 @@ const router = express.Router();
  *                   type: string
  *                   example: "Gravatar API request failed"
  */
-router.get('/api/profile/:identifier', standardLimiter, async (req, res) => {
+router.get('/profile/:identifier', standardLimiter, async (req, res) => {
   const { identifier } = req.params;
 
   try {

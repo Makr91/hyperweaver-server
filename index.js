@@ -13,8 +13,17 @@ import { loadConfig, setupTokenGuard } from './utils/config-loader.js';
 import { routes as configEngineRoutes } from './config/config-engine.js';
 import { exit, SERVICE_USER, UPLOAD_LIMIT } from './config/hyperweaver-server.js';
 import { ensureJwtSecret } from './utils/auth.js';
-import router from './routes/index.js';
 import { staticFileLimiter } from './routes/limiters.js';
+import authRoutes from './routes/auth.routes.js';
+import userRoutes from './routes/user.routes.js';
+import adminRoutes from './routes/admin.routes.js';
+import organizationsRoutes from './routes/organizations.routes.js';
+import serversRoutes from './routes/servers.routes.js';
+import statusRoutes from './routes/status.routes.js';
+import healthRoutes from './routes/health.routes.js';
+import rulesRoutes from './routes/rules.routes.js';
+import clientErrorsRoutes from './routes/client_errors.routes.js';
+import configRoutes from './routes/config.routes.js';
 import { authenticate, requireSuperAdmin } from './auth/auth.js';
 import ServerController from './controllers/ServerController.js';
 import db from './models/index.js';
@@ -232,11 +241,29 @@ configEngineRoutes(
   UPLOAD_LIMIT
 );
 
+app.use('/api', authRoutes);
+app.use('/api', userRoutes);
+app.use('/api', adminRoutes);
+app.use('/api', organizationsRoutes);
+app.use('/api', serversRoutes);
+app.use('/api', statusRoutes);
+app.use('/api', healthRoutes);
+app.use('/api', rulesRoutes);
+app.use('/api', clientErrorsRoutes);
+app.use('/api', configRoutes);
 app.use('/api', eventsRoutes);
 app.use('/api', favoritesRoutes);
 app.use('/api', notificationRoutes);
 app.use('/api', searchRoutes);
-app.use(router);
+
+app.use('/docs', staticFileLimiter, (req, res) => {
+  void req;
+  res.status(503).json({
+    error: 'Documentation not bundled in this build',
+    details:
+      'The docs site is bundled into the STARTcloud UI artifact (ui/docs) at UI build time; serve a UI artifact that includes it.',
+  });
+});
 
 app.use('/api-docs', swaggerUi.serve, (req, res, next) => {
   const { protocol } = req;
