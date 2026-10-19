@@ -6,7 +6,6 @@
       "release-type": "node",
       "package-name": "hyperweaver-server",
       "include-component-in-tag": false,
-      "extra-files": ["index.js", "config/swagger.js", "packaging/config/production-config.yaml"],
       "changelog-sections": [
         { "type": "feat", "section": "Features", "hidden": false },
         { "type": "fix", "section": "Bug Fixes", "hidden": false },

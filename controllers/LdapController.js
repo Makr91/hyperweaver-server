@@ -35,7 +35,7 @@ class LdapController {
    *         content:
    *           application/json:
    *             schema:
-   *               $ref: '#/components/schemas/LoginResponse'
+   *               $ref: '#/components/schemas/SigninResponse'
    *       400:
    *         description: Missing credentials or LDAP disabled
    *         content:

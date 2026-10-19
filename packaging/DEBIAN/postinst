@@ -38,36 +38,87 @@ case "$1" in
             fi
         else
             echo "Upgrade from version $2 detected - migrating configuration files"
+            if [ -f /etc/hyperweaver-server/setup.token ] && [ -f /etc/hyperweaver-server/db.config.yaml ]; then
+                rm -f /etc/hyperweaver-server/setup.token
+                echo "Removed the setup token left by the previous version; setup is already complete"
+            fi
             runuser -u hyperweaver-server -- /usr/bin/node /opt/hyperweaver-server/scripts/migrate-config.js
             echo "Configuration files in /etc/hyperweaver-server/ migrated; the previous copies sit beside them as .bak"
+            echo "Database files in /var/lib/hyperweaver-server/ will NOT be modified"
         fi
         ;;
 esac
 
-# Initialize database directory
 mkdir -p /var/lib/hyperweaver-server/database
+mkdir -p /var/log/hyperweaver-server
 chown hyperweaver-server:hyperweaver-server /var/lib/hyperweaver-server/database
+chown hyperweaver-server:hyperweaver-server /var/log/hyperweaver-server
 
-# Create SSL directory for certificate generation
 mkdir -p /etc/hyperweaver-server/ssl
 chown hyperweaver-server:hyperweaver-server /etc/hyperweaver-server/ssl
 chmod 700 /etc/hyperweaver-server/ssl
 
-# Reload systemd daemon
+if [ -d "/etc/letsencrypt/renewal-hooks/deploy" ]; then
+    echo "Certbot detected - installing Hyperweaver Server certificate renewal hook"
+    if [ -f "/opt/hyperweaver-server/scripts/certbot-deploy-hook.sh" ]; then
+        cp /opt/hyperweaver-server/scripts/certbot-deploy-hook.sh \
+           /etc/letsencrypt/renewal-hooks/deploy/hyperweaver-server-cert-deploy.sh
+        chmod 755 /etc/letsencrypt/renewal-hooks/deploy/hyperweaver-server-cert-deploy.sh
+        echo "Hyperweaver Server Certbot integration installed successfully"
+        echo "Certificates will be automatically updated when renewed via Certbot"
+    else
+        echo "Warning: Hyperweaver Server Certbot hook script not found"
+    fi
+else
+    echo "Certbot not detected - manual certificate management will be required"
+    echo "If you install Certbot later, Hyperweaver Server will provide integration instructions"
+fi
+
+get_port_from_config() {
+    local port_key="$1"
+    local config_file="/etc/hyperweaver-server/app.config.yaml"
+
+    if [ -f "$config_file" ]; then
+        grep "^  $port_key:" "$config_file" | sed 's/.*: *\([0-9]*\).*/\1/' | head -1
+    else
+        echo ""
+    fi
+}
+
+PORT=$(get_port_from_config "port")
+PORT=${PORT:-3443}
+
 systemctl daemon-reload
+systemctl enable --now hyperweaver-server-update.path || true
 
 echo ""
 echo "======================================================================"
-echo "Hyperweaver Server has been installed successfully!"
-echo ""
-echo "Next steps:"
-echo "1. Start the service: systemctl enable --now hyperweaver-server"
-echo "2. Read the setup token the first start writes: cat /etc/hyperweaver-server/setup.token"
-echo "3. Open https://localhost:3443 and enter the setup token"
-echo "4. Check status: systemctl status hyperweaver-server"
-echo "5. View logs: journalctl -u hyperweaver-server -f"
-echo ""
-echo "Configuration files location: /etc/hyperweaver-server/"
+if [ -z "$2" ]; then
+    echo "Hyperweaver Server has been installed successfully!"
+    echo ""
+    echo "Next steps:"
+    echo "1. Start the service: sudo systemctl enable --now hyperweaver-server"
+    echo "2. Read the setup token the first start writes: sudo cat /etc/hyperweaver-server/setup.token"
+    echo "3. Access Hyperweaver Server at: https://localhost:$PORT and enter the setup token"
+    echo "4. Check status: systemctl status hyperweaver-server"
+    echo "5. View logs: journalctl -u hyperweaver-server -f"
+    echo ""
+    echo "Configuration files location: /etc/hyperweaver-server/"
+    echo "Database location: /var/lib/hyperweaver-server/"
+else
+    echo "Hyperweaver Server has been upgraded successfully!"
+    echo ""
+    echo "Upgrade completed from version $2"
+    echo "All existing configuration files and databases have been preserved"
+    echo ""
+    echo "Next steps:"
+    echo "1. Restart the service: systemctl restart hyperweaver-server"
+    echo "2. Check status: systemctl status hyperweaver-server"
+    echo "3. View logs: journalctl -u hyperweaver-server -f"
+    echo ""
+    echo "Configuration files location: /etc/hyperweaver-server/"
+    echo "Database location: /var/lib/hyperweaver-server/"
+fi
 echo "======================================================================"
 echo ""
 

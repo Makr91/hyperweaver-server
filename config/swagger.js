@@ -1,14 +1,21 @@
+import { readFileSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
 import swaggerJsdoc from 'swagger-jsdoc';
 import swaggerUi from 'swagger-ui-express';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const { version } = JSON.parse(readFileSync(join(__dirname, '../package.json'), 'utf8'));
 
 const options = {
   definition: {
     openapi: '3.0.0',
     info: {
       title: 'Hyperweaver Server API',
-      version: '0.9.9', // x-release-please-version
+      version,
       description:
-        'API for Hyperweaver Server - control-plane web interface that aggregates and proxies agents (Zoneweaver Agent for Bhyve/OmniOS)',
+        'API for Hyperweaver Server - control-plane web interface that aggregates and proxies the Hyperweaver and Zoneweaver agents',
       license: {
         name: 'GPL-3.0',
         url: 'https://www.gnu.org/licenses/gpl-3.0.html',
@@ -38,76 +45,133 @@ const options = {
     components: {
       securitySchemes: {
         JwtAuth: {
+          type: 'apiKey',
+          in: 'header',
+          name: 'x-access-token',
+          description:
+            'The session JWT, minted by POST /api/auth/signin or the OIDC code exchange, sent as the x-access-token header.',
+        },
+        bearerAuth: {
           type: 'http',
           scheme: 'bearer',
-          bearerFormat: 'JWT',
           description:
-            'JWT token authentication. First login at [/api/auth/login](./api/auth/login) to get your JWT token, then use format: Bearer <jwt_token>',
+            'Authorization: Bearer carries the session JWT or an access token of a configured identity provider.',
         },
       },
       schemas: {
+        Membership: {
+          type: 'object',
+          description: 'One organization of the signed-in person, in the identity provider shape',
+          properties: {
+            uuid: { type: 'string', example: '3f2c1a9e-7b4d-4e2a-9c6f-1d8e5a7b9c0d' },
+            name: { type: 'string', example: 'Acme Corp' },
+            roles: {
+              type: 'array',
+              items: { type: 'string', enum: ['OWNER', 'ADMIN', 'MEMBER', 'GUEST'] },
+            },
+            primary: { type: 'boolean' },
+            personal: { type: 'boolean' },
+            logo_url: { type: 'string', nullable: true },
+            email_hash: { type: 'string', nullable: true },
+          },
+        },
         User: {
           type: 'object',
+          description: 'The profile GET /api/user and the sign-in answers carry',
           properties: {
-            id: {
+            id: { type: 'integer', example: 1 },
+            username: { type: 'string', example: 'john_admin' },
+            name: { type: 'string', nullable: true, example: 'John Admin' },
+            preferred_language: { type: 'string', nullable: true, example: 'en' },
+            preferred_mode: { type: 'string', nullable: true, example: 'dark' },
+            preferred_theme: { type: 'string', nullable: true },
+            preferred_motion: { type: 'string', nullable: true },
+            email: { type: 'string', format: 'email', example: 'john@example.com' },
+            verified: { type: 'boolean', example: true },
+            email_hash: {
+              type: 'string',
+              description: 'SHA-256 of the trimmed, lower-cased email, for Gravatar',
+            },
+            avatar_url: { type: 'string', nullable: true },
+            roles: {
+              type: 'array',
+              items: { type: 'string', enum: ['ROLE_USER', 'ROLE_ADMIN', 'ROLE_SUPER_ADMIN'] },
+              example: ['ROLE_ADMIN'],
+            },
+            organization: {
+              type: 'string',
+              nullable: true,
+              description: 'The primary organization name',
+            },
+            organizations: {
+              type: 'array',
+              items: { $ref: '#/components/schemas/Membership' },
+            },
+            entitlements: { type: 'array', items: { type: 'object' }, example: [] },
+          },
+        },
+        Problem: {
+          type: 'object',
+          description:
+            'RFC 9457 problem details, the body of every refused write and every failed read, sent as application/problem+json',
+          required: ['type', 'title', 'status', 'errors'],
+          properties: {
+            type: {
+              type: 'string',
+              format: 'uri',
+              description:
+                'A URI under https://auth.startcloud.com/probs/: validation, conflict, bad-request, authentication, forbidden, not-found, payload-too-large, throttled, internal, send-failed or bad-gateway',
+              example: 'https://auth.startcloud.com/probs/validation',
+            },
+            title: {
+              type: 'string',
+              description: 'The human summary of the type',
+              example: 'The request did not pass validation.',
+            },
+            status: {
               type: 'integer',
-              description: 'Unique user identifier',
-              example: 1,
+              description: 'The HTTP status of this occurrence',
+              example: 422,
             },
-            username: {
-              type: 'string',
-              description: 'Username',
-              example: 'john_admin',
-            },
-            email: {
-              type: 'string',
-              format: 'email',
-              description: 'User email address',
-              example: 'john@example.com',
-            },
-            role: {
-              type: 'string',
-              enum: ['user', 'admin', 'super-admin'],
-              description: 'User role/permission level',
-              example: 'admin',
-            },
-            auth_provider: {
-              type: 'string',
-              description: "User identity source (C1): 'local', 'ldap', or 'oidc-<provider>'",
-              example: 'oidc-startcloud',
-            },
-            organizationId: {
-              type: 'integer',
-              description: 'Organization ID (null for super-admin)',
-              example: 1,
-              nullable: true,
-            },
-            organizationName: {
-              type: 'string',
-              description: 'Organization name',
-              example: 'Acme Corp',
-              nullable: true,
-            },
-            createdAt: {
-              type: 'string',
-              format: 'date-time',
-              description: 'Account creation timestamp',
-              example: '2025-01-04T17:18:00.324Z',
-            },
-            lastLogin: {
-              type: 'string',
-              format: 'date-time',
-              description: 'Last login timestamp',
-              example: '2025-01-04T17:19:19.921Z',
-              nullable: true,
+            errors: {
+              type: 'array',
+              description: 'One entry per failing value',
+              items: {
+                type: 'object',
+                required: ['pointer', 'rule', 'params', 'detail'],
+                properties: {
+                  pointer: {
+                    type: 'string',
+                    description: 'RFC 6901 JSON Pointer into the request body as sent',
+                    example: '/name',
+                  },
+                  rule: {
+                    type: 'string',
+                    description: 'The JSON Schema keyword that failed, or unique',
+                    example: 'pattern',
+                  },
+                  params: {
+                    type: 'object',
+                    description:
+                      'The keyword value the message needs: { minLength }, { pattern } as the $defs name, { scope } on unique',
+                    example: { pattern: 'slug' },
+                  },
+                  detail: {
+                    type: 'string',
+                    description:
+                      'The host sentence for logs and other clients, never shown by the UI',
+                    example: 'name must match slug',
+                  },
+                },
+              },
             },
           },
         },
-        LoginRequest: {
+        SigninRequest: {
           type: 'object',
-          required: ['identifier', 'password'],
+          required: ['username', 'password'],
           properties: {
-            identifier: {
+            username: {
               type: 'string',
               description: 'Username or email address',
               example: 'john_admin',
@@ -115,32 +179,28 @@ const options = {
             password: {
               type: 'string',
               description: 'User password',
-              example: 'securePassword123',
+              example: 'a long passphrase with spaces',
+            },
+            stay_logged_in: {
+              type: 'boolean',
+              description: 'Whether the session outlives the browser tab',
             },
           },
         },
-        LoginResponse: {
-          type: 'object',
-          properties: {
-            success: {
-              type: 'boolean',
-              description: 'Operation success status',
-              example: true,
+        SigninResponse: {
+          allOf: [
+            { $ref: '#/components/schemas/User' },
+            {
+              type: 'object',
+              properties: {
+                access_token: {
+                  type: 'string',
+                  description: 'The session JWT, sent back as x-access-token',
+                  example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
+                },
+              },
             },
-            message: {
-              type: 'string',
-              description: 'Success message',
-              example: 'Login successful',
-            },
-            token: {
-              type: 'string',
-              description: 'JWT authentication token',
-              example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
-            },
-            user: {
-              $ref: '#/components/schemas/User',
-            },
-          },
+          ],
         },
         RegisterRequest: {
           type: 'object',
@@ -159,9 +219,11 @@ const options = {
             },
             password: {
               type: 'string',
-              minLength: 8,
-              description: 'Password (minimum 8 characters)',
-              example: 'securePassword123',
+              minLength: 15,
+              maxLength: 128,
+              description:
+                'Password, at least the configured minimum (15 by default) and at most 128 characters',
+              example: 'a long passphrase with spaces',
             },
             confirmPassword: {
               type: 'string',

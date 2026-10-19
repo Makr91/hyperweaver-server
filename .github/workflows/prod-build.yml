@@ -40,7 +40,7 @@ jobs:
           node-version: '22'
           cache: 'npm'
 
-      - name: Install Node.js dependencies
+      - name: Install dependencies
         run: npm ci
 
       - name: Fetch STARTcloud UI artifact
@@ -50,8 +50,11 @@ jobs:
           mkdir -p ui
           curl -fsSL "https://github.com/STARTcloud/startcloud-ui/releases/download/v${UI_VERSION}/startcloud-ui-${UI_VERSION}.tar.gz" | tar -xz -C ui
 
-      - name: Generate OpenAPI spec (published as a release asset)
+      - name: Generate OpenAPI documentation
         run: npm run generate-docs
+
+      - name: Remove dev dependencies for packaging
+        run: rm -rf node_modules && npm ci --omit=dev
 
       - name: Set Debian package variables
         run: |
@@ -62,39 +65,42 @@ jobs:
 
       - name: Create Debian package structure
         run: |
-          mkdir -p "${PACKAGE_NAME}_${VERSION}_${ARCH}"/{opt/hyperweaver-server,etc/hyperweaver-server,etc/systemd/system,var/lib/hyperweaver-server,var/log/hyperweaver-server,usr/share/man/man8,usr/share/man/man5,DEBIAN}
+          mkdir -p "${PACKAGE_NAME}_${VERSION}_${ARCH}"/{opt/hyperweaver-server/config-templates,opt/hyperweaver-server/scripts,etc/hyperweaver-server,etc/systemd/system,var/lib/hyperweaver-server,var/log/hyperweaver-server,DEBIAN}
 
       - name: Copy application files to Debian package
         run: |
-          cp -r controllers models routes auth config utils scripts index.js package.json "${PACKAGE_NAME}_${VERSION}_${ARCH}/opt/hyperweaver-server/"
+          cp -r controllers models routes auth config middleware rules utils scripts index.js package.json ui "${PACKAGE_NAME}_${VERSION}_${ARCH}/opt/hyperweaver-server/"
           cp -r node_modules "${PACKAGE_NAME}_${VERSION}_${ARCH}/opt/hyperweaver-server/"
-          cp -r ui "${PACKAGE_NAME}_${VERSION}_${ARCH}/opt/hyperweaver-server/ui"
 
       - name: Copy configuration files to Debian package
         run: |
-          cp packaging/config/production-config.yaml "${PACKAGE_NAME}_${VERSION}_${ARCH}/etc/hyperweaver-server/config.yaml"
-          cp packaging/DEBIAN/systemd/hyperweaver-server.service "${PACKAGE_NAME}_${VERSION}_${ARCH}/etc/systemd/system/"
-          cp packaging/DEBIAN/postinst packaging/DEBIAN/prerm packaging/DEBIAN/postrm "${PACKAGE_NAME}_${VERSION}_${ARCH}/DEBIAN/"
+          # Config templates
+          cp packaging/config/*.yaml "${PACKAGE_NAME}_${VERSION}_${ARCH}/opt/hyperweaver-server/config-templates/"
 
-      - name: Install man pages
-        run: |
-          # Copy and compress man pages following Debian Policy
-          gzip -9 -c packaging/DEBIAN/man/hyperweaver-server.8 > "${PACKAGE_NAME}_${VERSION}_${ARCH}/usr/share/man/man8/hyperweaver-server.8.gz"
-          gzip -9 -c packaging/DEBIAN/man/hyperweaver-server.yaml.5 > "${PACKAGE_NAME}_${VERSION}_${ARCH}/usr/share/man/man5/hyperweaver-server.yaml.5.gz"
+          # Scripts
+          cp packaging/scripts/certbot-deploy-hook.sh "${PACKAGE_NAME}_${VERSION}_${ARCH}/opt/hyperweaver-server/scripts/"
+
+          # Systemd service
+          cp packaging/DEBIAN/systemd/hyperweaver-server.service "${PACKAGE_NAME}_${VERSION}_${ARCH}/etc/systemd/system/"
+          cp packaging/DEBIAN/systemd/hyperweaver-server-update.path "${PACKAGE_NAME}_${VERSION}_${ARCH}/etc/systemd/system/"
+          cp packaging/DEBIAN/systemd/hyperweaver-server-update.service "${PACKAGE_NAME}_${VERSION}_${ARCH}/etc/systemd/system/"
+
+          # DEBIAN control scripts
+          cp packaging/DEBIAN/{preinst,postinst,prerm,postrm} "${PACKAGE_NAME}_${VERSION}_${ARCH}/DEBIAN/"
 
       - name: Create Debian control file
         run: |
           cat > "${PACKAGE_NAME}_${VERSION}_${ARCH}/DEBIAN/control" << EOF
           Package: hyperweaver-server
           Version: ${VERSION}
-          Section: misc
+          Section: web
           Priority: optional
           Architecture: ${ARCH}
           Maintainer: Makr91 <makr91@users.noreply.github.com>
           Depends: nodejs (>= 22.0.0), sqlite3, openssl
           Description: Hyperweaver Server - hypervisor control-plane web interface
-           Aggregates and proxies host agents (Zoneweaver Agent for Bhyve/OmniOS,
-           Hyperweaver Agent for VirtualBox) and serves the Hyperweaver UI.
+           Serves the STARTcloud UI, authenticates users and aggregates the
+           Hyperweaver and Zoneweaver agents from one pane.
           Homepage: https://github.com/Makr91/hyperweaver-server
           EOF
 
@@ -102,12 +108,48 @@ jobs:
         run: |
           find "${PACKAGE_NAME}_${VERSION}_${ARCH}" -type d -exec chmod 755 {} \;
           find "${PACKAGE_NAME}_${VERSION}_${ARCH}" -type f -exec chmod 644 {} \;
-          chmod 755 "${PACKAGE_NAME}_${VERSION}_${ARCH}/DEBIAN"/{postinst,prerm,postrm}
+          chmod 755 "${PACKAGE_NAME}_${VERSION}_${ARCH}/DEBIAN"/{preinst,postinst,prerm,postrm}
+          chmod 755 "${PACKAGE_NAME}_${VERSION}_${ARCH}/opt/hyperweaver-server/scripts"/*
 
       - name: Build Debian package
         run: |
           dpkg-deb --build "${PACKAGE_NAME}_${VERSION}_${ARCH}" "${PACKAGE_NAME}_${VERSION}_${ARCH}.deb"
 
+      #      # OmniOS Build Steps
+      #      - name: Fresh checkout for OmniOS build
+      #        uses: actions/checkout@v7
+      #        with:
+      #          path: omnios-source
+      #          clean: true
+      #
+      #      - name: Clean OmniOS build directory
+      #        run: |
+      #          ssh ghrunner@omnios.packages.startcloud.com "rm -rf /local/builds/hyperweaver-server/* /local/builds/hyperweaver-server/.*" || true
+      #
+      #      - name: Sync source code to OmniOS
+      #        run: |
+      #          rsync -av --delete \
+      #            --exclude='.git' \
+      #            --exclude='node_modules' \
+      #            --exclude='frontend/node_modules' \
+      #            --exclude='frontend/dist' \
+      #            --exclude='*.deb' \
+      #            omnios-source/ ghrunner@omnios.packages.startcloud.com:/local/builds/hyperweaver-server/
+      #
+      #      - name: Build package on OmniOS
+      #        run: |
+      #          ssh ghrunner@omnios.packages.startcloud.com "
+      #            cd /local/builds/hyperweaver-server &&
+      #            export PATH=/opt/ooce/bin:/opt/ooce/node-22/bin:\$PATH &&
+      #            export MAKE=gmake &&
+      #            chmod +x packaging/omnios/build.sh &&
+      #            ./packaging/omnios/build.sh
+      #          "
+      #
+      #      - name: Transfer OmniOS package back
+      #        run: |
+      #          rsync -av ghrunner@omnios.packages.startcloud.com:/local/builds/hyperweaver-server/*.p5p ./ || echo "No .p5p files found"
+      #
       - name: Install GitHub CLI
         run: |
           if ! command -v gh &> /dev/null; then
@@ -118,35 +160,88 @@ jobs:
             sudo apt install gh -y
           fi
 
-      - name: Upload Debian package and OpenAPI spec to release
+      - name: Upload Debian package to release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release upload "${TAG_NAME}" "${PACKAGE_NAME}_${VERSION}_${ARCH}.deb" openapi.json --clobber
+          gh release upload ${{ github.event.inputs.tag_name || env.TAG_NAME }} "${PACKAGE_NAME}_${VERSION}_${ARCH}.deb" --clobber
 
+      - name: Generate and upload SHA256SUMS
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          sha256sum "${PACKAGE_NAME}_${VERSION}_${ARCH}.deb" > SHA256SUMS.txt
+          gh release upload "${{ github.event.inputs.tag_name || env.TAG_NAME }}" SHA256SUMS.txt --clobber
+
+      - name: Generate and upload update-info.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ github.event.inputs.tag_name || env.TAG_NAME }}"
+          DL="https://github.com/${{ github.repository }}/releases/download/${TAG}"
+          NOTES="$(gh release view "${TAG}" --json body --jq .body | jq -Rs .)"
+          cat > update-info.json << EOF
+          {
+            "version": "${VERSION}",
+            "releaseUrl": "https://github.com/${{ github.repository }}/releases/tag/${TAG}",
+            "releaseDate": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "changelog": "https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md",
+            "releaseNotes": ${NOTES},
+            "linuxUrl": "${DL}/${PACKAGE_NAME}_${VERSION}_${ARCH}.deb",
+            "checksumsUrl": "${DL}/SHA256SUMS.txt"
+          }
+          EOF
+          gh release upload "${TAG}" update-info.json --clobber
+
+      #      - name: Upload OmniOS package to release
+      #        env:
+      #          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      #        run: |
+      #          for file in *.p5p; do
+      #            if [ -f "$file" ]; then
+      #              echo "Uploading $file..."
+      #              gh release upload ${{ github.event.inputs.tag_name || env.TAG_NAME }} "$file" --clobber
+      #            fi
+      #          done
+      #
+      #      - name: Publish OmniOS package to repository
+      #        run: |
+      #          ssh ghrunner@omnios.packages.startcloud.com "
+      #            cd /local/builds/hyperweaver-server &&
+      #            pfexec pkgsend publish -d proto -s file:///local/public/r151054/pkg hyperweaver-server.p5m.final &&
+      #            pfexec pkgrepo refresh -s /local/public/r151054/pkg &&
+      #            pfexec svcadm restart pkg/server:r151054_STARTcloud
+      #          "
+      #
+      #      - name: Clean up OmniOS build directory
+      #        run: |
+      #          ssh ghrunner@omnios.packages.startcloud.com "rm -rf /local/builds/hyperweaver-server/*"
+      #
       - name: Upload Debian package to repository server
         run: |
-          rsync -av hyperweaver-server_*.deb startcloud@66.6.204.177:/tmp/
+          rsync -av hyperweaver-server_*.deb startcloud@debian.startcloud.com:/tmp/
 
       - name: Add package to repository pool
         run: |
-          ssh startcloud@66.6.204.177 "
+          ssh startcloud@debian.startcloud.com "
             mkdir -p /local/public/debian/pool/main/h/hyperweaver-server
             cp /tmp/hyperweaver-server_*.deb /local/public/debian/pool/main/h/hyperweaver-server/
           "
 
       - name: Create multi-suite directory structure
         run: |
-          ssh startcloud@66.6.204.177 "
+          ssh startcloud@debian.startcloud.com "
             cd /local/public/debian
+            # Create suite directories if they don't exist
             mkdir -p dists/bookworm/main/binary-amd64
             mkdir -p dists/trixie/main/binary-amd64
           "
 
       - name: Update repository Packages files for all suites
         run: |
-          ssh startcloud@66.6.204.177 "
+          ssh startcloud@debian.startcloud.com "
             cd /local/public/debian
+            # Generate Packages files for each suite
             for suite in bookworm trixie; do
               dpkg-scanpackages --arch amd64 pool/ > dists/\$suite/main/binary-amd64/Packages
               gzip -c dists/\$suite/main/binary-amd64/Packages > dists/\$suite/main/binary-amd64/Packages.gz
@@ -155,8 +250,9 @@ jobs:
 
       - name: Generate Release files for all suites
         run: |
-          ssh startcloud@66.6.204.177 "
+          ssh startcloud@debian.startcloud.com "
             cd /local/public/debian
+            # Generate Release files for each suite
             for suite in bookworm trixie; do
               cd dists/\$suite
               /local/generate-release.sh \$suite > Release
@@ -166,7 +262,7 @@ jobs:
 
       - name: Create stable distribution with proper Release file
         run: |
-          ssh startcloud@66.6.204.177 "
+          ssh startcloud@debian.startcloud.com "
             cd /local/public/debian/dists
             rm -rf stable 2>/dev/null || true
             cp -r trixie stable
@@ -176,8 +272,9 @@ jobs:
 
       - name: Sign repository for all suites including stable
         run: |
-          ssh startcloud@66.6.204.177 "
+          ssh startcloud@debian.startcloud.com "
             cd /local/public/debian
+            # Sign each suite including stable
             for suite in bookworm trixie stable; do
               cd dists/\$suite
               export GNUPGHOME=\$(mktemp -d /local/pgp/pgpkeys-XXXXXX)
@@ -191,4 +288,4 @@ jobs:
 
       - name: Cleanup temporary files
         run: |
-          ssh startcloud@66.6.204.177 "rm -f /tmp/hyperweaver-server_*.deb"
+          ssh startcloud@debian.startcloud.com "rm -f /tmp/hyperweaver-server_*.deb"
