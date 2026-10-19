@@ -6,6 +6,7 @@ import { signSessionToken } from '../../utils/auth.js';
 import { loadConfig } from '../../utils/config-loader.js';
 import { profileOf } from '../user/getuserprofile.js';
 import { buildRpLogoutUrl, revokeOidcGrant } from '../../auth/oidcLogout.js';
+import { notifySessionTerminated } from '../../utils/events.js';
 
 const { user: UserModel } = db;
 
@@ -248,6 +249,7 @@ export const oidcLogout = async (req, res) => {
     const sessionOidc = req.session?.oidc;
     if (userId) {
       await UserModel.update({ sessions_invalid_after: new Date() }, { where: { id: userId } });
+      notifySessionTerminated(userId);
     }
     let redirectUrl = null;
     if (sessionOidc?.provider && sessionOidc.userId === userId) {

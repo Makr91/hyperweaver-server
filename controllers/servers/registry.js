@@ -1,6 +1,7 @@
 import db from '../../models/index.js';
 import { log } from '../../utils/Logger.js';
 import { filterAndAnnotateServers } from '../../utils/orgVisibility.js';
+import { notifyServersUpdated } from '../../utils/agentRelay.js';
 
 const { server: ServerModel } = db;
 
@@ -111,6 +112,7 @@ export const addServer = async (req, res) => {
       apiKey,
       allowInsecure: Boolean(allowInsecure),
     });
+    notifyServersUpdated();
 
     return res.json({
       success: true,

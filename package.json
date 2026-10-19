@@ -51,6 +51,7 @@
     "passport-oauth2": "^1.8.0",
     "swagger-jsdoc": "^6.2.8",
     "swagger-ui-express": "^5.0.1",
+    "undici": "^8.12.2",
     "winston": "^3.17.0",
     "winston-daily-rotate-file": "^5.0.0",
     "ws": "^8.21.1",

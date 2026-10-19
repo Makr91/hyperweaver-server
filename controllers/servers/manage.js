@@ -1,6 +1,7 @@
 import db from '../../models/index.js';
 import { log } from '../../utils/Logger.js';
 import { serverCache } from './cache.js';
+import { notifyServersUpdated } from '../../utils/agentRelay.js';
 
 const { server: ServerModel } = db;
 
@@ -85,6 +86,7 @@ export const removeServer = async (req, res) => {
       });
     }
 
+    notifyServersUpdated();
     return res.json({
       success: true,
       message: 'Server removed successfully',
@@ -199,6 +201,7 @@ export const updateServer = async (req, res) => {
 
     await server.update({ allow_insecure: allowInsecure });
     serverCache.delete(`id:${server.id}`);
+    notifyServersUpdated();
 
     return res.json({
       success: true,

@@ -2,6 +2,7 @@ import axios from 'axios';
 import https from 'https';
 import { log } from '../utils/Logger.js';
 import { loadConfig } from '../utils/config.js';
+import { broadcast } from '../utils/events.js';
 
 /**
  * Encode path segments with special handling for FMRI service paths
@@ -113,11 +114,11 @@ export const attachServerRequestMethods = Server => {
    * Poll the agent's public /status endpoint (dual-mode plan §3.1): slim identity +
    * capabilities, no API key required, no zoneadm exec (unlike the fat /stats).
    */
-  Server.prototype.fetchStatus = async function (timeoutMs = 5000) {
+  Server.prototype.fetchStatus = async function (timeoutMs) {
     const serverUrl = this.getServerUrl();
     try {
       const response = await axios.get(`${serverUrl}/status`, {
-        timeout: timeoutMs,
+        timeout: timeoutMs || loadConfig().agents.poll_timeout,
         httpsAgent: new https.Agent({
           rejectUnauthorized: !this.allow_insecure,
           keepAlive: false,
@@ -138,13 +139,17 @@ export const attachServerRequestMethods = Server => {
    * Harvest + persist capabilities and freshness from /status (D11 health loop). On
    * failure, leave capabilities as-is and do NOT refresh last_seen (it ages → stale).
    */
-  Server.prototype.refreshStatus = async function (timeoutMs = 5000) {
+  Server.prototype.refreshStatus = async function (timeoutMs) {
     const result = await this.fetchStatus(timeoutMs);
     if (result.success) {
+      const changed = JSON.stringify(this.capabilities ?? null) !== JSON.stringify(result.data);
       try {
         await this.update({ capabilities: result.data, last_seen: new Date() });
       } catch (error) {
         log.server.warn('Failed to persist agent status', { error: error.message });
+      }
+      if (changed) {
+        broadcast('hosts', 'servers-updated', {});
       }
     }
     return result;

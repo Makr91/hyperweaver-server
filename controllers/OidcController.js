@@ -1,5 +1,6 @@
 import { loadConfig } from '../utils/config.js';
 import { issueLoginCode } from './auth/signin.js';
+import { notifySessionTerminated } from '../utils/events.js';
 
 const config = loadConfig();
 import { log } from '../utils/Logger.js';
@@ -332,6 +333,7 @@ class OidcController {
       if (user) {
         // Real SLO (model (a), per-user): revoke all this user's app JWTs.
         await user.update({ sessions_invalid_after: new Date() });
+        notifySessionTerminated(user.id);
         log.auth.info('Back-channel logout: revoked user app tokens', {
           providerName,
           userId: user.id,

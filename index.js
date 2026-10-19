@@ -21,7 +21,7 @@ import { specs, swaggerUi } from './config/swagger.js';
 import { log, createRequestLogger, generateRequestId } from './utils/Logger.js';
 import { configAwareI18nMiddleware as i18nMiddleware } from './config/i18n.js';
 import { errorHandler } from './middleware/errorHandler.js';
-import { startAgentHealthPoller } from './utils/agentHealthPoller.js';
+import eventsRoutes from './routes/events.routes.js';
 import { handleWebSocketUpgrade } from './utils/wsProxy.js';
 import { generateSSLCertificatesIfNeeded } from './utils/sslSetup.js';
 import { csrfProtection } from './auth/csrfProtection.js';
@@ -172,8 +172,6 @@ log.app.info('Session middleware configured for OIDC support');
   }
 })();
 
-startAgentHealthPoller();
-
 app.use((req, res, next) => {
   req.requestId = generateRequestId();
   const logger = createRequestLogger(req.requestId, req);
@@ -203,6 +201,7 @@ configEngineRoutes(
   UPLOAD_LIMIT
 );
 
+app.use('/api', eventsRoutes);
 app.use(router);
 
 app.use('/api-docs', swaggerUi.serve, (req, res, next) => {
