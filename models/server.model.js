@@ -1,6 +1,8 @@
 import { DataTypes } from '@sequelize/core';
 import { attachServerRequestMethods } from './serverRequests.js';
 
+const AGENT_ROLES = ['agent', 'hyperweaver-agent', 'zoneweaver-agent'];
+
 export default sequelize => {
   const Server = sequelize.define(
     'servers',
@@ -159,6 +161,16 @@ export default sequelize => {
 
   Server.prototype.getServerUrl = function () {
     return `${this.protocol}://${this.hostname}:${this.port}`;
+  };
+
+  /**
+   * Whether the row's reported status names an agent, by the role an agent
+   * answers on its `GET /api/status`; a row with no status yet is admitted.
+   * @returns {boolean}
+   */
+  Server.prototype.isAgentRole = function () {
+    const role = this.capabilities?.role;
+    return !role || AGENT_ROLES.includes(role);
   };
 
   Server.prototype.updateLastUsed = function () {

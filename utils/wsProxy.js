@@ -20,7 +20,7 @@ const resolveAgentForWs = async id => {
     return null;
   }
   const server = await ServerModel.withScope('withApiKey').findByPk(parseInt(id));
-  if (server?.capabilities?.role && server.capabilities.role !== 'agent') {
+  if (server && !server.isAgentRole()) {
     log.websocket.warn('WebSocket upgrade rejected: registered backend is not an agent', { id });
     return null;
   }

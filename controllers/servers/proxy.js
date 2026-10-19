@@ -341,7 +341,7 @@ export const proxyToAgent = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Agent not found' });
     }
 
-    if (server.capabilities?.role && server.capabilities.role !== 'agent') {
+    if (!server.isAgentRole()) {
       return res.status(409).json({
         success: false,
         message: 'Registered backend is not an agent',

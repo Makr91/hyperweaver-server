@@ -291,7 +291,7 @@ app.get('/agent/api-docs/swagger.json', async (req, res) => {
     if (!agent) {
       return res.status(404).send(stub(`No registered agent with id ${id}.`));
     }
-    if (agent.capabilities?.role && agent.capabilities.role !== 'agent') {
+    if (!agent.isAgentRole()) {
       return res.status(409).send(stub('The selected backend is not an agent.'));
     }
     const specResponse = await axios.get(
