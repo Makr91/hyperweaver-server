@@ -1,59 +1,48 @@
-import passport from '../auth/passport.js';
 import { log } from '../utils/Logger.js';
+import { problem } from '../utils/problem.js';
+import { resolveRequestAuth, sessionTokenOf } from '../utils/requestAuth.js';
 
-/**
- * Authentication middleware for protecting routes (now using Passport.js)
- * @param {Object} req - Express request object
- * @param {Object} res - Express response object
- * @param {Function} next - Express next function
- */
-export const authenticateToken = (req, res, next) => {
-  passport.authenticate('jwt', { session: false }, (err, user, info) => {
-    if (err) {
-      log.auth.error('Token authentication error', { error: err.message });
-      return res.status(500).json({
-        success: false,
-        message: 'Authentication error',
-      });
-    }
+const unauthenticated = (req, res) =>
+  problem(res, req, { status: 401, type: 'authentication', title: req.__('auth.unauthorized') });
 
-    if (!user) {
-      // Map Passport.js info to existing error messages for consistency
-      let message = 'Invalid token';
-
-      if (info && info.message) {
-        if (info.message.includes('user not found')) {
-          message = 'Invalid token - user not found';
-        } else if (info.name === 'TokenExpiredError' || info.message.includes('expired')) {
-          message = 'Token expired';
-        } else if (info.name === 'JsonWebTokenError') {
-          message = 'Invalid token';
-        } else if (info.message.includes('required') || info.message.includes('No auth token')) {
-          message = 'Access token required';
-        }
-      }
-
-      return res.status(401).json({
-        success: false,
-        message,
-      });
-    }
-
-    // Set user on request (same format as before)
-    req.user = user;
-    return next();
-  })(req, res, next);
+const adopt = (req, auth) => {
+  req.user = {
+    userId: auth.userId,
+    username: auth.username,
+    email: auth.email,
+    role: auth.role,
+    auth_provider: auth.provider,
+  };
+  req.userId = auth.userId;
+  req.authProvider = auth.provider;
+  req.tokenClaims = auth.claims;
+  req.lapsedSession = auth.lapsed;
 };
 
 /**
- * JWT-based authentication middleware (CSRF-safe)
+ * Require a session: the JWT on `x-access-token` or `Authorization: Bearer`,
+ * resolved through `resolveRequestAuth`; a refused credential answers 401.
+ * The refresh route alone admits a lapsed federated session.
  * @param {Object} req - Express request object
  * @param {Object} res - Express response object
  * @param {Function} next - Express next function
  */
-export const authenticate = (req, res, next) =>
-  // Use JWT authentication only (sessions removed for CSRF security)
-  authenticateToken(req, res, next);
+export const authenticate = async (req, res, next) => {
+  try {
+    const refreshRoute = req.path.endsWith('/auth/refresh-token');
+    const auth = await resolveRequestAuth(req, { allowLapsed: refreshRoute });
+    if (!auth) {
+      return unauthenticated(req, res);
+    }
+    adopt(req, auth);
+    return next();
+  } catch (error) {
+    log.auth.error('Token authentication error', { error: error.message });
+    return problem(res, req, { status: 500, type: 'internal' });
+  }
+};
+
+export const authenticateToken = authenticate;
 
 /**
  * Role-based authorization middleware
@@ -135,24 +124,18 @@ export const requireSuperAdmin = (req, res, next) => {
  * @param {Object} res - Express response object
  * @param {Function} next - Express next function
  */
-export const optionalAuth = (req, res, next) => {
-  // Only try authentication if Authorization header is present
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return next(); // No auth header, continue without user
-  }
-
-  return passport.authenticate('jwt', { session: false }, (err, user, info) => {
-    if (err) {
-      log.auth.warn('Optional auth error', { error: err.message });
-    }
-    if (info) {
-      log.auth.debug('Optional auth info', { info: info.message });
-    }
-    // Always continue to next middleware, regardless of auth result
-    if (user) {
-      req.user = user; // Set user if authentication succeeded
-    }
+export const optionalAuth = async (req, res, next) => {
+  void res;
+  if (!sessionTokenOf(req)) {
     return next();
-  })(req, res, next);
+  }
+  try {
+    const auth = await resolveRequestAuth(req);
+    if (auth) {
+      adopt(req, auth);
+    }
+  } catch (error) {
+    log.auth.warn('Optional auth error', { error: error.message });
+  }
+  return next();
 };

@@ -1,25 +1,27 @@
-export default (sequelize, Sequelize) => {
+import { DataTypes } from '@sequelize/core';
+
+export default sequelize => {
   const RevokedSession = sequelize.define(
     'revoked_session',
     {
       sid: {
-        type: Sequelize.STRING(255),
+        type: DataTypes.STRING(255),
         primaryKey: true,
         allowNull: false,
       },
       issuer: {
-        type: Sequelize.STRING(255),
+        type: DataTypes.STRING(255),
         allowNull: false,
       },
       userId: {
-        type: Sequelize.INTEGER,
+        type: DataTypes.INTEGER,
         allowNull: true,
-        field: 'user_id',
+        columnName: 'user_id',
       },
       expiresAt: {
-        type: Sequelize.DATE,
+        type: DataTypes.DATE,
         allowNull: false,
-        field: 'expires_at',
+        columnName: 'expires_at',
       },
     },
     {

@@ -96,8 +96,8 @@ const corsOptions = {
 app.set('trust proxy', appConfig.frontend.trust_proxy);
 app.use(cors(corsOptions));
 app.options('*splat', cors(corsOptions));
-app.use(express.json({ limit: '50mb' }));
 app.use(i18nMiddleware);
+app.use(express.json({ limit: '50mb' }));
 
 app.use(express.static('./ui'));
 

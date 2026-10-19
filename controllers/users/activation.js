@@ -76,7 +76,7 @@ const { user: UserModel } = db;
  *               $ref: '#/components/schemas/ErrorResponse'
  */
 /**
- * Deactivate AND revoke: setting tokens_valid_after kills the user's outstanding app
+ * Deactivate AND revoke: setting sessions_invalid_after kills the user's outstanding app
  * JWTs on their next request (admin force-logout) — is_active alone would leave any
  * already-issued token working until the auth layer's inactive check catches it.
  * @param {Object} req - Express request object
@@ -102,7 +102,7 @@ export const deactivateUser = async (req, res) => {
     }
 
     const [affectedRows] = await UserModel.update(
-      { is_active: false, tokens_valid_after: new Date() },
+      { is_active: false, sessions_invalid_after: new Date() },
       { where: { id: userId, is_active: true } }
     );
     const success = affectedRows > 0;

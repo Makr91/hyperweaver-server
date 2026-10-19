@@ -1,5 +1,5 @@
-import jwt from 'jsonwebtoken';
 import { loadConfig } from '../utils/config.js';
+import { issueLoginCode } from './auth/signin.js';
 
 const config = loadConfig();
 import { log } from '../utils/Logger.js';
@@ -80,7 +80,7 @@ class OidcController {
       //    RegistrationHintDetector honors it). This is how "Register" routes to the provider.
       //  - ?silent (or ?prompt=none) → prompt=none: seamless SSO. If the browser already has an
       //    IdP session the IdP returns a code with no UI (auto-login); otherwise it returns
-      //    login_required, which handleOidcCallback turns into a quiet fall-back to /ui/login.
+      //    login_required, which handleOidcCallback turns into a quiet fall-back to /login.
       const wantsRegister =
         req.query.register !== undefined || req.query.screen_hint === 'register';
       const wantsSilent =
@@ -184,7 +184,7 @@ class OidcController {
       }
 
       if (!provider) {
-        return res.redirect('/ui/login?error=no_provider');
+        return res.redirect('/login?error=no_provider');
       }
 
       // Get OIDC providers from nested configuration structure
@@ -194,11 +194,11 @@ class OidcController {
       const providerConfig = oidcProvidersConfig[provider];
 
       if (!providerConfig) {
-        return res.redirect(`/ui/login?error=provider_not_found&provider=${provider}`);
+        return res.redirect(`/login?error=provider_not_found&provider=${provider}`);
       }
 
       if (!providerConfig.enabled) {
-        return res.redirect(`/ui/login?error=provider_disabled&provider=${provider}`);
+        return res.redirect(`/login?error=provider_disabled&provider=${provider}`);
       }
 
       // Use passport to authenticate with specific OIDC provider
@@ -216,8 +216,8 @@ class OidcController {
         // access_denied) via this redirect directly, so the silent case needs the benign
         // marker here too — the error-callback below only sees thrown errors.
         failureRedirect: silent
-          ? '/ui/login?sso=unavailable'
-          : `/ui/login?error=oidc_failed&provider=${provider}`,
+          ? '/login?sso=unavailable'
+          : `/login?error=oidc_failed&provider=${provider}`,
       })(req, res, err => {
         if (err) {
           // Silent SSO: the IdP reports no usable session (login / interaction / consent /
@@ -233,13 +233,13 @@ class OidcController {
           ].includes(oidcErr);
           if (silent && benignSilent) {
             log.auth.info('Silent OIDC auth: no active provider session', { provider, oidcErr });
-            return res.redirect('/ui/login?sso=unavailable');
+            return res.redirect('/login?sso=unavailable');
           }
           log.auth.error('OIDC callback error', {
             provider,
             error: err.message,
           });
-          return res.redirect(`/ui/login?error=oidc_failed&provider=${provider}`);
+          return res.redirect(`/login?error=oidc_failed&provider=${provider}`);
         }
 
         const { user } = req;
@@ -248,30 +248,14 @@ class OidcController {
           // In silent mode a fail (e.g. access_denied) also means "not signed in" — quiet fallback.
           if (silent) {
             log.auth.info('Silent OIDC auth: not authenticated at provider', { provider });
-            return res.redirect('/ui/login?sso=unavailable');
+            return res.redirect('/login?sso=unavailable');
           }
           log.auth.error('OIDC callback: No user object found', { provider });
-          return res.redirect(`/ui/login?error=oidc_failed&provider=${provider}`);
+          return res.redirect(`/login?error=oidc_failed&provider=${provider}`);
         }
 
-        // Generate JWT token for OIDC user. auth_provider = `oidc-<name>` (C1, user-identity axis).
-        const token = jwt.sign(
-          {
-            userId: user.id,
-            username: user.username,
-            email: user.email,
-            role: user.role,
-            auth_provider: `oidc-${provider}`,
-          },
-          config.authentication.jwt_secret,
-          { expiresIn: config.authentication.jwt_expiration || '24h' }
-        );
-
-        // Set session if using express-session
         if (req.session) {
           req.session.userId = user.id;
-          req.session.username = user.username;
-          req.session.role = user.role;
         }
 
         log.auth.info('OIDC login successful', {
@@ -280,19 +264,8 @@ class OidcController {
           email: user.email,
         });
 
-        // Hand the app JWT to the SPA via the URL FRAGMENT (#token=) — the agreed design (§5.2 #1
-        // / §5.1 #2): fragments aren't sent in Referer headers or written to server access logs,
-        // so the bearer token doesn't leak. REQUIRES the UI's AuthCallback to read location.hash
-        // (NOT ?token=/searchParams) — a coordinated flip both repos ship together. Only the app
-        // JWT rides here; the OIDC tokens stay server-side in req.session.oidc (§4).
-        const { protocol } = req;
-        const host = req.get('host');
-        const frontendUrl = `${protocol}://${host}`;
-
-        log.auth.debug('OIDC redirect URL', {
-          frontendUrl: `${frontendUrl}/ui/auth/callback`,
-        });
-        return res.redirect(`${frontendUrl}/ui/auth/callback#token=${encodeURIComponent(token)}`);
+        const code = issueLoginCode(user.id, `oidc-${provider}`);
+        return res.redirect(`/auth/callback?code=${encodeURIComponent(code)}`);
       });
     } catch (error) {
       log.auth.error('OIDC callback error', { error: error.message });
@@ -302,10 +275,10 @@ class OidcController {
         error.message &&
         (error.message.includes('Access denied') || error.message.includes('Invitation required'))
       ) {
-        return res.redirect('/ui/login?error=access_denied');
+        return res.redirect('/login?error=access_denied');
       }
 
-      return res.redirect('/ui/login?error=token_generation_failed');
+      return res.redirect('/login?error=token_generation_failed');
     }
   }
 
@@ -358,7 +331,7 @@ class OidcController {
 
       if (user) {
         // Real SLO (model (a), per-user): revoke all this user's app JWTs.
-        await user.update({ tokens_valid_after: new Date() });
+        await user.update({ sessions_invalid_after: new Date() });
         log.auth.info('Back-channel logout: revoked user app tokens', {
           providerName,
           userId: user.id,

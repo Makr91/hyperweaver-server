@@ -12,6 +12,9 @@ import InvitationController from '../controllers/InvitationController.js';
 import MailController from '../controllers/MailController.js';
 import ServerController from '../controllers/ServerController.js';
 import StatusController from '../controllers/StatusController.js';
+import { signin, exchange, refreshToken, oidcLogout } from '../controllers/auth/signin.js';
+import { getUserProfile } from '../controllers/user/getuserprofile.js';
+import { updatePreferences } from '../controllers/user/preferences.js';
 import * as FavoritesController from '../controllers/FavoritesController.js';
 import ConfigController from '../controllers/ConfigController.js';
 import { oidcTokenRefresh } from '../auth/oidcTokenRefresh.js';
@@ -35,7 +38,18 @@ import gravatarRouter from './gravatar.js';
 const router = express.Router();
 
 router.post('/api/auth/register', authLimiter, RegistrationController.register);
-router.post('/api/auth/login', authLimiter, AuthController.login);
+router.post('/api/auth/signin', authLimiter, signin);
+router.post('/api/auth/oidc/exchange', authLimiter, exchange);
+router.post('/api/auth/refresh-token', authLimiter, authenticate, oidcTokenRefresh, refreshToken);
+router.post('/api/auth/oidc/logout', standardLimiter, optionalAuth, oidcLogout);
+router.get('/api/user', standardLimiter, authenticate, oidcTokenRefresh, getUserProfile);
+router.patch(
+  '/api/user/preferences',
+  standardLimiter,
+  authenticate,
+  oidcTokenRefresh,
+  updatePreferences
+);
 router.post('/api/auth/ldap', authLimiter, LdapController.ldapLogin);
 router.get('/api/auth/oidc/callback', standardLimiter, OidcController.handleOidcCallback);
 /**
@@ -56,8 +70,6 @@ router.post(
  */
 router.get('/api/auth/oidc/issuers', standardLimiter, OidcController.getOidcIssuers);
 router.get('/api/auth/oidc/:provider', standardLimiter, OidcController.startOidcLogin);
-router.post('/api/auth/logout', standardLimiter, optionalAuth, AuthController.logout);
-router.get('/api/auth/profile', standardLimiter, authenticate, AccountController.getProfile);
 router.post(
   '/api/auth/change-password',
   authLimiter,
@@ -70,7 +82,6 @@ router.delete(
   authenticate,
   UserManagementController.deleteSelfAccount
 );
-router.get('/api/auth/verify', standardLimiter, AuthController.verifyToken);
 router.get('/api/auth/setup-status', standardLimiter, RegistrationController.checkSetupStatus);
 router.get('/api/auth/methods', standardLimiter, AuthController.getAuthMethods);
 

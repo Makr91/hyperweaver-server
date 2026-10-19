@@ -16,7 +16,7 @@ import { setupOidcProviders, getOidcConfiguration } from './oidcStrategies.js';
  * issuer/audience initially, for compatibility). Rejects missing AND deactivated
  * users — a deactivated account's JWT must die immediately, not live out its 24h
  * (this is the "still active" check the fresh findByPk exists for). Real SLO:
- * rejects any token issued before the user's revocation cutoff (tokens_valid_after,
+ * rejects any token issued before the user's revocation cutoff (sessions_invalid_after,
  * set to now() on every logout); payload.iat is seconds since epoch.
  */
 passport.use(
@@ -40,9 +40,9 @@ passport.use(
         }
 
         if (
-          user.tokens_valid_after &&
+          user.sessions_invalid_after &&
           payload.iat &&
-          payload.iat * 1000 < new Date(user.tokens_valid_after).getTime()
+          payload.iat * 1000 < new Date(user.sessions_invalid_after).getTime()
         ) {
           return done(null, false, { message: 'Token revoked' });
         }

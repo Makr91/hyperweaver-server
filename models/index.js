@@ -88,6 +88,7 @@ const modelFiles = [
   'credential.model.js',
   'serverOrg.model.js',
   'machineOrg.model.js',
+  'revokedSession.model.js',
 ];
 
 // Initialize models - handle async imports properly

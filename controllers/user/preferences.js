@@ -9,12 +9,12 @@
 import axios from 'axios';
 import { log } from '../../utils/Logger.js';
 import { problem, refuse } from '../../utils/problem.js';
-import { getSiteConfig } from '../../utils/config-loader.js';
 import db from '../../models/index.js';
 import { getAuthServerUrl, extractOidcAccessToken } from '../favorites/helpers.js';
-import { notifyProfileUpdated } from '../../utils/events.js';
 
 const { user: User } = db;
+
+const getSiteConfig = () => null;
 
 const badRequest = (req, res, title) =>
   problem(res, req, { status: 400, type: 'bad-request', title });
@@ -128,11 +128,10 @@ const findInvalidField = body => {
 const buildPatch = body => {
   const patch = {};
   const columns = {
-    language: 'preferredLanguage',
-    mode: 'preferredMode',
-    theme: 'preferredTheme',
-    motion: 'preferredMotion',
-    timezone: 'timezone',
+    language: 'preferred_language',
+    mode: 'preferred_mode',
+    theme: 'preferred_theme',
+    motion: 'preferred_motion',
   };
 
   for (const [key, column] of Object.entries(columns)) {
@@ -144,11 +143,10 @@ const buildPatch = body => {
 };
 
 const toWireShape = user => ({
-  language: user.preferredLanguage || null,
-  mode: user.preferredMode || null,
-  theme: user.preferredTheme || null,
-  motion: user.preferredMotion || null,
-  timezone: user.timezone || null,
+  language: user.preferred_language || null,
+  mode: user.preferred_mode || null,
+  theme: user.preferred_theme || null,
+  motion: user.preferred_motion || null,
 });
 
 const delegateToProvider = async (req, body) => {
@@ -286,7 +284,7 @@ export const updatePreferences = async (req, res) => {
       return res.status(200).send(toWireShape(user));
     }
 
-    if (user.authProvider && user.authProvider !== 'local') {
+    if (user.auth_provider && user.auth_provider !== 'local') {
       try {
         const delegated = await delegateToProvider(req, body);
         if (!delegated) {
@@ -308,7 +306,6 @@ export const updatePreferences = async (req, res) => {
     }
 
     await user.update(patch);
-    notifyProfileUpdated(user.id);
     return res.status(200).send(toWireShape(user));
   } catch (err) {
     log.error.error('Error updating preferences:', err);
