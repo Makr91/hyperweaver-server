@@ -43,12 +43,12 @@ jobs:
       - name: Install Node.js dependencies
         run: npm ci
 
-      - name: Fetch Hyperweaver UI artifact
+      - name: Fetch STARTcloud UI artifact
         run: |
-          UI_VERSION=$(node -p "require('./package.json').hyperweaverUiVersion")
-          echo "Fetching Hyperweaver UI v${UI_VERSION}"
+          UI_VERSION=$(node -p "require('./package.json').startcloudUiVersion")
+          echo "Fetching STARTcloud UI v${UI_VERSION}"
           mkdir -p ui
-          curl -fsSL "https://github.com/MarkProminic/hyperweaver-ui/releases/download/v${UI_VERSION}/hyperweaver-ui-${UI_VERSION}.tar.gz" | tar -xz -C ui
+          curl -fsSL "https://github.com/STARTcloud/startcloud-ui/releases/download/v${UI_VERSION}/startcloud-ui-${UI_VERSION}.tar.gz" | tar -xz -C ui
 
       - name: Generate OpenAPI spec (published as a release asset)
         run: npm run generate-docs

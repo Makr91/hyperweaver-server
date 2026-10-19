@@ -1,8 +1,8 @@
 {
   "name": "hyperweaver-server",
   "version": "0.9.9",
-  "description": "Hyperweaver Server - Node control plane that serves the Hyperweaver UI, authenticates users, and proxies/aggregates host agents",
-  "hyperweaverUiVersion": "0.10.12",
+  "description": "Hyperweaver Server - Node control plane that serves the STARTcloud UI, authenticates users, and proxies/aggregates host agents",
+  "startcloudUiVersion": "0.57.0",
   "main": "index.js",
   "type": "module",
   "scripts": {
