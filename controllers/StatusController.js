@@ -7,36 +7,67 @@
  */
 
 import { readFileSync } from 'fs';
-import { loadConfig } from '../utils/config.js';
+import { CONFIG_NAMES, loadConfig } from '../utils/config-loader.js';
 
-// Server version — single source of truth is the root package.json
 const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
-/**
- * Derive the enabled auth method tokens from config. Mirrors the enable logic in
- * AuthController.getAuthMethods, but returns the slim token array the status
- * contract wants (§3.2): local is on unless explicitly disabled; ldap/oidc reflect config.
- * @param {Object} config - Loaded configuration
- * @returns {string[]} Enabled auth method tokens
- */
-const enabledAuthMethods = config => {
-  const auth = config.authentication || {};
-  const methods = [];
+const EVENT_TOPICS = [
+  'session',
+  'notifications',
+  'health',
+  'profile',
+  'tasks',
+  'hosts',
+  'monitoring',
+  'sessions',
+];
 
-  if (auth.local_enabled !== false) {
-    methods.push('local');
-  }
-  if (auth.ldap_enabled === true) {
-    methods.push('ldap');
-  }
-
-  const oidcProviders = auth.oidc_providers || {};
-  if (Object.values(oidcProviders).some(provider => provider?.enabled)) {
-    methods.push('oidc');
-  }
-
-  return methods;
+const STATUS = {
+  role: 'hyperweaver-server',
+  version,
+  brand: {
+    name: 'Hyperweaver',
+    logo_url: '/brand/hyperweaver/mark.svg',
+    repo: 'https://github.com/Makr91/hyperweaver-server',
+    changelog: 'https://github.com/Makr91/hyperweaver-server/releases',
+  },
+  auth: ['backend'],
+  collections: [],
+  config: CONFIG_NAMES,
+  events: { path: '/api/events', topics: EVENT_TOPICS },
+  search: { path: '/api/search', kinds: ['host', 'machine', 'user', 'organization'] },
+  links: { docs: '/docs', contact: '', api: '/api-docs', community: [] },
+  ticket: null,
 };
+
+const FEATURES = [
+  'setup',
+  'admin',
+  'update',
+  'org-console',
+  'invitations',
+  'favorites',
+  'notifications',
+  'inbox',
+  'health',
+  'footer',
+  'sidebar',
+  'search',
+  'events',
+  'rules',
+  'hosts',
+  'certs',
+  'tools',
+];
+
+/**
+ * The feature tokens this host lists: the fixed set, `local-accounts`
+ * while local sign-in is on.
+ * @param {Object} authentication - The auth file's `authentication` section
+ * @returns {string[]} The tokens
+ */
+const featuresOf = authentication =>
+  authentication.local_enabled === false ? FEATURES : ['local-accounts', ...FEATURES];
 
 /**
  * Server status controller
@@ -46,42 +77,82 @@ class StatusController {
    * @swagger
    * /api/status:
    *   get:
-   *     summary: Server identity and enabled auth methods (public)
-   *     description: Public dual-mode probe. Pins the SPA to Aggregated mode and reports which authentication methods are enabled, before login.
+   *     summary: The host's identity, auth method and feature tokens (public)
+   *     description: Answered before login. role is hyperweaver-server, the aggregating host whose agents the shared UI addresses as /api/agents/{id}/{path}; auth is backend, the app's own session; features gates every surface the UI draws, local-accounts present while local sign-in is on; config names the configuration files served at /api/config/<name>; events names the one stream and every topic it carries; search names the search route and its kinds; datacenter_label is the name of the hosts tree's root while branding.public_datacenter_label is on.
    *     tags: [System]
    *     responses:
    *       200:
-   *         description: Server status
+   *         description: The status payload
    *         content:
    *           application/json:
    *             schema:
    *               type: object
+   *               required: [role, version, brand, auth, features, config, events, search, links, ticket]
    *               properties:
    *                 role:
    *                   type: string
-   *                   example: server
+   *                   example: hyperweaver-server
    *                 version:
    *                   type: string
-   *                   example: 0.8.1
+   *                   example: 0.9.9
+   *                 brand:
+   *                   type: object
+   *                   properties:
+   *                     name: { type: string, example: Hyperweaver }
+   *                     logo_url: { type: string, example: /brand/hyperweaver/mark.svg }
+   *                     repo: { type: string }
+   *                     changelog: { type: string }
    *                 auth:
    *                   type: array
-   *                   items:
-   *                     type: string
-   *                   example: ['local', 'oidc']
+   *                   items: { type: string }
+   *                   example: [backend]
+   *                 collections:
+   *                   type: array
+   *                   items: { type: string }
+   *                   example: []
+   *                 features:
+   *                   type: array
+   *                   items: { type: string }
+   *                 config:
+   *                   type: array
+   *                   items: { type: string }
+   *                   example: [app, auth, db, mail]
+   *                 events:
+   *                   type: object
+   *                   properties:
+   *                     path: { type: string, example: /api/events }
+   *                     topics:
+   *                       type: array
+   *                       items: { type: string }
+   *                 search:
+   *                   type: object
+   *                   properties:
+   *                     path: { type: string, example: /api/search }
+   *                     kinds:
+   *                       type: array
+   *                       items: { type: string }
+   *                 links:
+   *                   type: object
+   *                   properties:
+   *                     docs: { type: string }
+   *                     contact: { type: string }
+   *                     api: { type: string }
+   *                     community:
+   *                       type: array
+   *                       items: { type: object }
+   *                 ticket:
+   *                   type: object
+   *                   nullable: true
+   *                 datacenter_label:
+   *                   type: string
    */
   static getServerStatus(req, res) {
     void req;
-    const config = loadConfig();
-    const payload = {
-      role: 'server',
-      version,
-      auth: enabledAuthMethods(config),
-    };
-    // C6: expose the aggregate-root label pre-auth ONLY when the operator opts in
-    // (public_datacenter_label). When off, the UI falls back to a generic label pre-auth and
-    // reads the real one post-login from /api/auth/verify.
-    if (config.branding?.public_datacenter_label) {
-      payload.datacenter_label = config.branding?.datacenter_label || 'Hyperweaver';
+    const { authentication } = loadConfig('auth');
+    const { branding } = loadConfig('app');
+    const payload = { ...STATUS, features: featuresOf(authentication) };
+    if (branding.public_datacenter_label) {
+      payload.datacenter_label = branding.datacenter_label;
     }
     res.json(payload);
   }
