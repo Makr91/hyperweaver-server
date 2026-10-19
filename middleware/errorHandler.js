@@ -1,0 +1,60 @@
+import { existsSync } from 'fs';
+import { join } from 'path';
+import { log } from '../utils/Logger.js';
+import { problem } from '../utils/problem.js';
+
+const errorHandler = (err, req, res, next) => {
+  if (err.type === 'entity.too.large') {
+    return problem(res, req, { status: 413, type: 'payload-too-large' });
+  }
+
+  if (err.type === 'entity.parse.failed') {
+    return problem(res, req, { status: 400, type: 'bad-request' });
+  }
+
+  // Log the error with full details
+  log.error.error('Express error handler', {
+    error: err.message,
+    stack: err.stack,
+    path: req?.path,
+    method: req?.method,
+  });
+
+  // Log request details for debugging
+  if (req) {
+    log.app.error('Request error details', {
+      method: req.method,
+      url: req.url,
+      path: req.path,
+      ip: req.ip || req.connection?.remoteAddress,
+      user: req.entity?.name || req.user?.username,
+      error: err.message,
+    });
+  }
+
+  // Check if response already sent
+  if (res.headersSent) {
+    return next(err);
+  }
+
+  // Return JSON for API routes
+  if (req?.path?.startsWith('/api/')) {
+    log.app.debug('Returning JSON error for API route', {
+      path: req.path,
+      error: err.message,
+    });
+    return problem(res, req, { status: 500, type: 'internal' });
+  }
+
+  // Serve React app with error state for non-API routes
+  const staticPath = join(process.cwd(), 'ui', 'index.html');
+  if (existsSync(staticPath)) {
+    res.status(500);
+    return res.sendFile(staticPath);
+  }
+
+  // Fallback to plain message if React app not available
+  return res.status(500).send('Internal server error');
+};
+
+export { errorHandler };

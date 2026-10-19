@@ -15,6 +15,21 @@ server:
   ssl_cert_path: ./ssl/cert.pem
   ssl_ca_path: ''
   force_secure: true
+internationalization:
+  default_language: en
+  supported_languages: []
+  fallback_language: en
+  auto_detect: true
+  force_language: ''
+frontend_logging:
+  enabled: true
+  level: info
+  categories:
+    app: info
+    auth: info
+    api: info
+    file: info
+    component: debug
 security:
   cors:
     whitelist:

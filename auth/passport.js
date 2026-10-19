@@ -24,8 +24,11 @@ passport.use(
   new JwtStrategy(
     {
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
-      secretOrKeyProvider: (request, rawJwtToken, done) =>
-        done(null, loadConfig('auth').authentication.jwt_secret),
+      secretOrKeyProvider: (request, rawJwtToken, done) => {
+        void request;
+        void rawJwtToken;
+        done(null, loadConfig('auth').authentication.jwt_secret);
+      },
     },
     async (payload, done) => {
       try {

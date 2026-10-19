@@ -19,6 +19,8 @@ import ServerController from './controllers/ServerController.js';
 import db from './models/index.js';
 import { specs, swaggerUi } from './config/swagger.js';
 import { log, createRequestLogger, generateRequestId } from './utils/Logger.js';
+import { configAwareI18nMiddleware as i18nMiddleware } from './config/i18n.js';
+import { errorHandler } from './middleware/errorHandler.js';
 import { startAgentHealthPoller } from './utils/agentHealthPoller.js';
 import { handleWebSocketUpgrade } from './utils/wsProxy.js';
 import { generateSSLCertificatesIfNeeded } from './utils/sslSetup.js';
@@ -95,6 +97,7 @@ app.set('trust proxy', appConfig.frontend.trust_proxy);
 app.use(cors(corsOptions));
 app.options('*splat', cors(corsOptions));
 app.use(express.json({ limit: '50mb' }));
+app.use(i18nMiddleware);
 
 app.use(express.static('./ui'));
 
@@ -319,6 +322,8 @@ app.get('*splat', staticFileLimiter, (req, res) => {
   void req;
   res.sendFile('./ui/index.html', { root: '.' });
 });
+
+app.use(errorHandler);
 
 (async () => {
   if (appConfig.server.ssl_enabled) {

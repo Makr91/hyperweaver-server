@@ -172,6 +172,80 @@ properties:
     required:
       - hostname
       - port
+  internationalization:
+    type: object
+    section: application
+    subsection: internationalization
+    title: Internationalization
+    properties:
+      default_language:
+        type: string
+        default: en
+        title: Default language
+        description: Language used when none is detected
+        order: 1
+      supported_languages:
+        type: array
+        items:
+          type: string
+        default: []
+        title: Supported languages
+        description: Languages offered; empty detects them from the locale files
+        order: 2
+      fallback_language:
+        type: string
+        default: en
+        title: Fallback language
+        description: Language used when a translation is missing
+        order: 3
+      auto_detect:
+        type: boolean
+        default: true
+        title: Language detection
+        description: Detect the language from the request
+        order: 4
+      force_language:
+        type: string
+        default: ''
+        title: Forced language
+        description: Language applied to every request regardless of preference; empty disables
+        order: 5
+  frontend_logging:
+    type: object
+    section: logging
+    subsection: frontendLogging
+    title: Frontend Logging
+    properties:
+      enabled:
+        type: boolean
+        default: true
+        title: Frontend logging
+        description: Enable browser logging in the frontend
+        order: 1
+      level:
+        type: string
+        enum:
+          - error
+          - warn
+          - info
+          - debug
+          - trace
+        default: info
+        title: Log level
+        description: Default frontend logging level
+        order: 2
+      categories:
+        type: object
+        subsection: frontendLoggingCategories
+        title: Frontend Logging Categories
+        additionalProperties:
+          type: string
+          enum:
+            - error
+            - warn
+            - info
+            - debug
+            - trace
   security:
     type: object
     section: security
