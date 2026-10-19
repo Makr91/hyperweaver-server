@@ -51,6 +51,7 @@ logs/
 /config/setup.token
 /ssl/
 /data/
+/FOLLOWUPS/
 
 # Generated at build by scripts/generate-docs.js and published as a release asset.
 openapi.json
