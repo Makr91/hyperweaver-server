@@ -45,8 +45,8 @@ export const csrfProtection = (req, res, next) => {
   const allowed = new Set(
     [
       `${req.protocol}://${req.get('host')}`,
-      originOf(config.frontend?.frontend_url?.value || ''),
-      ...(config.security?.cors?.whitelist?.value || []).map(originOf),
+      originOf(config.frontend?.frontend_url || ''),
+      ...(config.security?.cors?.whitelist || []).map(originOf),
     ].filter(Boolean)
   );
 

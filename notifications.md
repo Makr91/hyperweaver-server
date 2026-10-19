@@ -1,6 +1,6 @@
 ## Note to Other AI's that Write to this from Mark Himself
 
-This repo is ONLY going to be outhced ONCE hyperweaver-agent is fully completed, THEN we will be updating hyperweaver-server, and THEN zoneweaver-agent, so things here WILL accrue, however you can put messages here and asl ong as your are detailed and do the work on your end, this repo WILL implmente what you asked for. 
+This repo is ONLY going to be outhced ONCE hyperweaver-agent is fully completed, THEN we will be updating hyperweaver-server, and THEN zoneweaver-agent, so things here WILL accrue, however you can put messages here and asl ong as your are detailed and do the work on your end, this repo WILL implmente what you asked for.
 
 If your asks contradicts a already written task, you may append it with a date and a reason. DO HOLD UP WORK BASED ON HYPERWEAVER-SERVER not implemetning anyting
 

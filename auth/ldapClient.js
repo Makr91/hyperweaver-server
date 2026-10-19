@@ -25,16 +25,16 @@ const escapeFilterValue = value => String(value).replace(/[\\*()]/g, ch => FILTE
 const getLdapConfig = () => {
   const { authentication } = loadConfig();
   return {
-    url: authentication.ldap_url.value,
-    bindDN: authentication.ldap_bind_dn.value,
-    bindCredentials: authentication.ldap_bind_credentials.value,
-    searchBase: authentication.ldap_search_base.value,
-    searchFilter: authentication.ldap_search_filter.value,
-    searchAttributes: (authentication.ldap_search_attributes.value || '')
+    url: authentication.ldap_url,
+    bindDN: authentication.ldap_bind_dn,
+    bindCredentials: authentication.ldap_bind_credentials,
+    searchBase: authentication.ldap_search_base,
+    searchFilter: authentication.ldap_search_filter,
+    searchAttributes: (authentication.ldap_search_attributes || '')
       .split(',')
       .map(s => s.trim())
       .filter(Boolean),
-    tlsRejectUnauthorized: authentication.ldap_tls_reject_unauthorized?.value || false,
+    tlsRejectUnauthorized: authentication.ldap_tls_reject_unauthorized || false,
   };
 };
 

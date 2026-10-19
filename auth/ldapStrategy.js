@@ -66,7 +66,7 @@ export const setupLdapStrategy = async () => {
     });
   }
 
-  if (!config.authentication?.ldap_enabled?.value) {
+  if (!config.authentication?.ldap_enabled) {
     log.auth.info('LDAP authentication disabled in configuration');
     return;
   }

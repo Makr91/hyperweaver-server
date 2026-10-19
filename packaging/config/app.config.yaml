@@ -1,0 +1,69 @@
+schemaVersion: 1
+frontend:
+  name: Hyperweaver
+  frontend_url: https://localhost:3443
+  trust_proxy: 1
+branding:
+  datacenter_label: Hyperweaver
+  public_datacenter_label: true
+server:
+  hostname: localhost
+  port: 3443
+  ssl_enabled: true
+  ssl_generate: true
+  ssl_key_path: /etc/hyperweaver-server/ssl/key.pem
+  ssl_cert_path: /etc/hyperweaver-server/ssl/cert.pem
+  ssl_ca_path: ''
+  force_secure: true
+security:
+  cors:
+    whitelist:
+      - https://localhost:3443
+      - https://localhost
+    credentials: true
+logging:
+  level: info
+  console_enabled: true
+  log_directory: /var/log/hyperweaver-server
+  performance_threshold_ms: 1000
+  file_rotation:
+    max_size: 50
+    max_files: 5
+  categories:
+    auth: info
+    database: warn
+    api: info
+    proxy: warn
+    mail: info
+    websocket: warn
+    performance: warn
+    app: info
+limits:
+  max_servers_per_user: 10
+  api_timeouts:
+    default_request: 60000
+    file_upload: 1800000
+  file_uploads:
+    max_file_size_gb: 50
+rate_limiting:
+  window_minutes: 15
+  max_requests: 1000
+  auth_max_requests: 25
+  file_operations_max_requests: 5000
+  proxy_max_requests: 2000
+  message: Too many requests from this IP, please try again later.
+  skip_successful_requests: false
+  skip_failed_requests: false
+agents:
+  poll_timeout: 5000
+integrations:
+  boxvault:
+    url: ''
+  gravatar:
+    api_key: ''
+ticket_system:
+  enabled: false
+  base_url: ''
+  req_type: sso
+  context: https://github.com/Makr91/hyperweaver-server
+  fallback_customer_id: ''

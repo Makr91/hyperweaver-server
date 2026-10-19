@@ -14,8 +14,8 @@ const getPollConfig = () => {
   const config = loadConfig();
   const agents = config.agents || {};
   return {
-    interval: agents.poll_interval?.value || 60000,
-    timeout: agents.poll_timeout?.value || 5000,
+    interval: 60000,
+    timeout: agents.poll_timeout,
   };
 };
 

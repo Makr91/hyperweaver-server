@@ -26,7 +26,7 @@ export const sendWelcomeEmail = async (user, organizationName) => {
     const loginUrl = `${frontendUrl}/login`;
 
     const mailOptions = {
-      from: mailConfig.smtp_from.value,
+      from: mailConfig.smtp_from,
       to: user.email,
       subject: `Welcome to Hyperweaver - ${organizationName}`,
       html: `

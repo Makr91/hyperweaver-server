@@ -11,10 +11,6 @@ import OrganizationController from '../controllers/OrganizationController.js';
 import InvitationController from '../controllers/InvitationController.js';
 import MailController from '../controllers/MailController.js';
 import ServerController from '../controllers/ServerController.js';
-import SettingsController from '../controllers/SettingsController.js';
-import SslController from '../controllers/SslController.js';
-import BackupController from '../controllers/BackupController.js';
-import CollectionController from '../controllers/CollectionController.js';
 import StatusController from '../controllers/StatusController.js';
 import * as FavoritesController from '../controllers/FavoritesController.js';
 import ConfigController from '../controllers/ConfigController.js';
@@ -373,92 +369,6 @@ router.all(
   authorizeAgentSubPath,
   orgAuthorizeAgent,
   ServerController.proxyToAgent
-);
-
-router.get(
-  '/api/settings',
-  adminLimiter,
-  authenticate,
-  requireSuperAdmin,
-  SettingsController.getSettings
-);
-router.put(
-  '/api/settings',
-  adminLimiter,
-  authenticate,
-  requireSuperAdmin,
-  SettingsController.updateSettings
-);
-router.post(
-  '/api/settings/ssl/upload',
-  adminLimiter,
-  authenticate,
-  requireSuperAdmin,
-  SslController.uploadSSLFile
-);
-router.post(
-  '/api/settings/reset',
-  adminLimiter,
-  authenticate,
-  requireSuperAdmin,
-  SettingsController.resetSettings
-);
-router.post(
-  '/api/settings/restart',
-  adminLimiter,
-  authenticate,
-  requireSuperAdmin,
-  SettingsController.restartServer
-);
-router.get(
-  '/api/settings/backups',
-  adminLimiter,
-  authenticate,
-  requireSuperAdmin,
-  BackupController.getBackups
-);
-router.post(
-  '/api/settings/restore/:filename',
-  adminLimiter,
-  authenticate,
-  requireSuperAdmin,
-  BackupController.restoreFromBackup
-);
-router.delete(
-  '/api/settings/backups/:filename',
-  adminLimiter,
-  authenticate,
-  requireSuperAdmin,
-  BackupController.deleteBackup
-);
-
-router.get(
-  '/api/settings/collections/:path',
-  adminLimiter,
-  authenticate,
-  requireSuperAdmin,
-  CollectionController.getCollection
-);
-router.post(
-  '/api/settings/collections/:path',
-  adminLimiter,
-  authenticate,
-  requireSuperAdmin,
-  CollectionController.createCollectionItem
-);
-router.put(
-  '/api/settings/collections/:path/:key',
-  adminLimiter,
-  authenticate,
-  requireSuperAdmin,
-  CollectionController.updateCollectionItem
-);
-router.delete(
-  '/api/settings/collections/:path/:key',
-  adminLimiter,
-  authenticate,
-  requireSuperAdmin,
-  CollectionController.deleteCollectionItem
 );
 
 router.post(

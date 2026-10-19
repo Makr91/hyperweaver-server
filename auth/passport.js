@@ -5,13 +5,11 @@
 
 import passport from 'passport';
 import { Strategy as JwtStrategy, ExtractJwt } from 'passport-jwt';
-import { loadConfig } from '../utils/config.js';
+import { loadConfig } from '../utils/config-loader.js';
 import db from '../models/index.js';
 import { log } from '../utils/Logger.js';
 import { setupLdapStrategy } from './ldapStrategy.js';
 import { setupOidcProviders, getOidcConfiguration } from './oidcStrategies.js';
-
-const config = loadConfig();
 
 /**
  * JWT Strategy — matches the legacy custom middleware behavior exactly (no
@@ -26,7 +24,8 @@ passport.use(
   new JwtStrategy(
     {
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
-      secretOrKey: config.authentication.jwt_secret.value,
+      secretOrKeyProvider: (request, rawJwtToken, done) =>
+        done(null, loadConfig('auth').authentication.jwt_secret),
     },
     async (payload, done) => {
       try {

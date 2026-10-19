@@ -1,0 +1,8 @@
+schemaVersion: 1
+mail:
+  smtp_host: localhost
+  smtp_port: 587
+  smtp_secure: false
+  smtp_user: ''
+  smtp_password: ''
+  smtp_from: Hyperweaver <noreply@localhost>

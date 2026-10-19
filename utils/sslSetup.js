@@ -8,12 +8,12 @@ const config = loadConfig();
  * Generate SSL certificates if they don't exist and ssl_generate is enabled
  */
 export const generateSSLCertificatesIfNeeded = async () => {
-  if (!config.server.ssl_generate.value) {
+  if (!config.server.ssl_generate) {
     return false;
   }
 
-  const keyPath = config.server.ssl_key_path.value;
-  const certPath = config.server.ssl_cert_path.value;
+  const keyPath = config.server.ssl_key_path;
+  const certPath = config.server.ssl_cert_path;
 
   if (fs.existsSync(keyPath) && fs.existsSync(certPath)) {
     log.app.info('SSL certificates already exist, skipping generation');

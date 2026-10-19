@@ -1,0 +1,62 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+title: Mail
+schemaVersion: 1
+sections:
+  mail:
+    title: Mail
+    order: 1
+properties:
+  schemaVersion:
+    type: integer
+    readOnly: true
+    default: 1
+    title: Schema version
+  mail:
+    type: object
+    section: mail
+    subsection: smtpSettings
+    title: SMTP
+    properties:
+      smtp_host:
+        type: string
+        default: localhost
+        title: SMTP host
+        description: SMTP server hostname
+        order: 1
+      smtp_port:
+        type: integer
+        minimum: 1
+        maximum: 65535
+        default: 587
+        title: SMTP port
+        description: 587 for STARTTLS, 465 for SSL, 25 for plain
+        order: 2
+      smtp_secure:
+        type: boolean
+        default: false
+        title: Use SSL
+        description: true for SSL on port 465, false for STARTTLS on port 587
+        order: 3
+      smtp_user:
+        type: string
+        default: ''
+        title: SMTP user
+        description: SMTP authentication username
+        order: 4
+      smtp_password:
+        type: string
+        writeOnly: true
+        default: ''
+        title: SMTP password
+        description: SMTP authentication password
+        order: 5
+      smtp_from:
+        type: string
+        default: Hyperweaver <noreply@localhost>
+        title: From address
+        description: From address for outgoing mail
+        order: 6
+    required:
+      - smtp_host
+      - smtp_port
+      - smtp_from

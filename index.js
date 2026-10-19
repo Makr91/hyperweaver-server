@@ -8,12 +8,16 @@ import cors from 'cors';
 import axios from 'axios';
 import session from 'express-session';
 import SequelizeStore from './utils/SequelizeSessionStore.js';
-import rateLimit from 'express-rate-limit';
+import { loadConfig, setupTokenGuard } from './utils/config-loader.js';
+import { routes as configEngineRoutes } from './config/config-engine.js';
+import { exit, SERVICE_USER, UPLOAD_LIMIT } from './config/hyperweaver-server.js';
+import { ensureJwtSecret } from './utils/auth.js';
 import router from './routes/index.js';
+import { staticFileLimiter } from './routes/limiters.js';
+import { authenticate, requireSuperAdmin } from './auth/auth.js';
 import ServerController from './controllers/ServerController.js';
 import db from './models/index.js';
 import { specs, swaggerUi } from './config/swagger.js';
-import { loadConfig } from './utils/config.js';
 import { log, createRequestLogger, generateRequestId } from './utils/Logger.js';
 import { startAgentHealthPoller } from './utils/agentHealthPoller.js';
 import { handleWebSocketUpgrade } from './utils/wsProxy.js';
@@ -74,44 +78,20 @@ process.on('uncaughtException', err => {
   });
 });
 
-const config = loadConfig();
+await ensureJwtSecret();
 
-/**
- * Fail-fast on a weak/placeholder JWT secret (contract §4). HS256 signs BOTH the app JWT
- * and the express-session cookie below, so a missing, placeholder, or short secret forges
- * every session.
- */
-const jwtSecret = config.authentication?.jwt_secret?.value;
-if (!jwtSecret || jwtSecret === '__JWT_SECRET_FROM_FILE__' || jwtSecret.length < 32) {
-  log.app.error(
-    'FATAL: authentication.jwt_secret is missing, the unreplaced placeholder, or too weak ' +
-      '(minimum 32 characters). Set a strong random secret before starting. Refusing to start.'
-  );
-  process.exit(1);
-}
-
-const staticFileLimiter = rateLimit({
-  windowMs: config.limits?.staticFiles?.windowMs?.value || 15 * 60 * 1000,
-  limit: config.limits?.staticFiles?.max?.value || 5000,
-  message: {
-    error:
-      config.limits?.staticFiles?.message?.value ||
-      'Too many static file requests, please try again later',
-  },
-  standardHeaders: true,
-  legacyHeaders: false,
-});
+const appConfig = loadConfig('app');
+const { jwt_secret: jwtSecret } = loadConfig('auth').authentication;
 
 const app = express();
-const port = process.env.PORT || config.frontend.port.value;
+const { port } = appConfig.server;
 
 const corsOptions = {
-  origin: config.security.cors.allow_origin.value,
-  preflightContinue: config.security.cors.preflight_continue.value,
-  credentials: config.security.cors.credentials.value,
+  origin: appConfig.security.cors.whitelist,
+  credentials: appConfig.security.cors.credentials,
 };
 
-app.set('trust proxy', config.frontend.trust_proxy.value);
+app.set('trust proxy', appConfig.frontend.trust_proxy);
 app.use(cors(corsOptions));
 app.options('*splat', cors(corsOptions));
 app.use(express.json({ limit: '50mb' }));
@@ -148,7 +128,7 @@ app.use(
     saveUninitialized: false,
     rolling: true,
     cookie: {
-      secure: config.server.ssl_enabled.value,
+      secure: appConfig.server.ssl_enabled,
       httpOnly: true,
       maxAge: 30 * 60 * 1000,
       sameSite: 'lax',
@@ -207,6 +187,18 @@ app.use((req, res, next) => {
 });
 
 app.use(csrfProtection);
+
+configEngineRoutes(
+  app,
+  {
+    admin: [authenticate, requireSuperAdmin],
+    setup: [setupTokenGuard],
+    actor: req => Promise.resolve(req.user?.email || req.user?.username || ''),
+    user: SERVICE_USER,
+  },
+  exit,
+  UPLOAD_LIMIT
+);
 
 app.use(router);
 
@@ -329,17 +321,17 @@ app.get('*splat', staticFileLimiter, (req, res) => {
 });
 
 (async () => {
-  if (config.server.ssl_enabled.value) {
+  if (appConfig.server.ssl_enabled) {
     await generateSSLCertificatesIfNeeded();
 
     try {
-      const privateKey = fs.readFileSync(config.server.ssl_key_path.value, 'utf8');
-      const certificate = fs.readFileSync(config.server.ssl_cert_path.value, 'utf8');
+      const privateKey = fs.readFileSync(appConfig.server.ssl_key_path, 'utf8');
+      const certificate = fs.readFileSync(appConfig.server.ssl_cert_path, 'utf8');
 
       const credentials = { key: privateKey, cert: certificate };
 
-      if (config.server.ssl_ca_path?.value) {
-        const ca = fs.readFileSync(config.server.ssl_ca_path.value, 'utf8');
+      if (appConfig.server.ssl_ca_path) {
+        const ca = fs.readFileSync(appConfig.server.ssl_ca_path, 'utf8');
         credentials.ca = ca;
       }
 
@@ -358,11 +350,11 @@ app.get('*splat', staticFileLimiter, (req, res) => {
        *         are dropped — no upgrade handler on this listener).
        * false → dual-serve: the HTTP port serves the full app + WS upgrades alongside HTTPS.
        */
-      const forceSecure = config.server.force_secure?.value !== false;
+      const forceSecure = appConfig.server.force_secure !== false;
       if (forceSecure) {
         const redirectApp = express();
         redirectApp.use((req, res) => {
-          const rawHost = req.headers.host || config.server.hostname.value;
+          const rawHost = req.headers.host || appConfig.server.hostname;
           const hostname = rawHost.startsWith('[')
             ? rawHost.replace(/^(?<bracketed>\[[^\]]+\]).*$/, '$<bracketed>')
             : rawHost.replace(/:\d+$/, '');
@@ -411,4 +403,4 @@ app.get('*splat', staticFileLimiter, (req, res) => {
   }
 })();
 
-export { config };
+export { appConfig as config };

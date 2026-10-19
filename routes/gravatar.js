@@ -85,7 +85,7 @@ router.get('/api/profile/:identifier', standardLimiter, async (req, res) => {
 
   try {
     const appConfig = loadConfig();
-    const apiKey = appConfig.integrations?.gravatar?.api_key?.value;
+    const apiKey = appConfig.integrations?.gravatar?.api_key;
 
     const hash = crypto.createHash('sha256').update(identifier.trim().toLowerCase()).digest('hex');
 

@@ -5,39 +5,14 @@ import { SqliteDialect } from '@sequelize/sqlite3';
 import { PostgresDialect } from '@sequelize/postgres';
 import { MySqlDialect } from '@sequelize/mysql';
 import { MariaDbDialect } from '@sequelize/mariadb';
-import { loadConfig } from '../utils/config.js';
+import { loadConfig } from '../utils/config-loader.js';
 import { createMigrationHelper } from '../config/DatabaseMigrations.js';
 import { log, createTimer } from '../utils/Logger.js';
 
-let config;
-try {
-  config = loadConfig();
-} catch (e) {
-  log.app.error('Failed to load configuration', { error: e.message });
-  process.exit(1);
-}
+const dbConfig = loadConfig('db').database;
 
-const dbConfig = {
-  dialect: config.database.dialect.value,
-  storage: config.database.storage?.value,
-  host: config.database.host?.value,
-  port: config.database.port?.value,
-  user: config.database.user?.value,
-  password: config.database.password?.value,
-  database: config.database.database_name?.value,
-  logging: config.database.logging?.value,
-  pool: {
-    max: config.database.pool?.max?.value,
-    min: config.database.pool?.min?.value,
-    acquire: config.database.pool?.acquire?.value,
-    idle: config.database.pool?.idle?.value,
-  },
-};
-
-// Configure Sequelize based on database dialect
-// Handle both flat format and UI metadata format
-const dialect = dbConfig.dialect?.value || dbConfig.dialect || 'sqlite';
-const loggingEnabled = dbConfig.logging?.value || dbConfig.logging || false;
+const { dialect } = dbConfig;
+const loggingEnabled = dbConfig.logging;
 
 // Sequelize 7 requires the dialect CLASS (not the v6 string). Map the
 // config dialect string to its corresponding @sequelize dialect class.
@@ -89,31 +64,12 @@ if (dialect === 'sqlite') {
 
   log.database.info('Using SQLite database', { storage: sequelizeConfig.storage });
 } else {
-  // MySQL/PostgreSQL/MariaDB configuration
-  sequelizeConfig.host = dbConfig.host?.value || dbConfig.host || 'localhost';
-  sequelizeConfig.port =
-    dbConfig.port?.value || dbConfig.port || (dialect === 'postgresql' ? 5432 : 3306);
-
-  // Connection pooling
-  const poolConfig = dbConfig.pool;
-  if (poolConfig) {
-    sequelizeConfig.pool = {
-      max: poolConfig.max?.value || poolConfig.max || 5,
-      min: poolConfig.min?.value || poolConfig.min || 0,
-      acquire: poolConfig.acquire?.value || poolConfig.acquire || 30000,
-      idle: poolConfig.idle?.value || poolConfig.idle || 10000,
-    };
-  }
-}
-
-// Sequelize 7 takes a single config object. Credentials/database live as
-// `user`/`password`/`database` keys (note v7 uses `user`, not `username`).
-// SQLite needs none of these (it uses `storage`, set above).
-if (dialect !== 'sqlite') {
-  sequelizeConfig.database =
-    dbConfig.database_name?.value || dbConfig.database_name || 'hyperweaver_server';
-  sequelizeConfig.user = dbConfig.user?.value || dbConfig.user || 'hyperweaver_server';
-  sequelizeConfig.password = dbConfig.password?.value || dbConfig.password || '';
+  sequelizeConfig.host = dbConfig.host;
+  sequelizeConfig.port = dbConfig.port;
+  sequelizeConfig.pool = { ...dbConfig.pool };
+  sequelizeConfig.database = dbConfig.database_name;
+  sequelizeConfig.user = dbConfig.user;
+  sequelizeConfig.password = dbConfig.password;
 }
 
 const sequelize = new Sequelize(sequelizeConfig);

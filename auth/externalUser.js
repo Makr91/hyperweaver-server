@@ -53,9 +53,9 @@ const determineUserOrganization = async email => {
     return invitation.organization_id;
   }
 
-  if (config.authentication?.external_domain_mapping_enabled?.value) {
+  if (config.authentication?.external_domain_mapping_enabled) {
     try {
-      const mappingsJson = config.authentication.external_domain_mappings?.value || '{}';
+      const mappingsJson = config.authentication.external_domain_mappings || '{}';
       log.auth.debug('Raw domain mappings config', { mappingsJson });
 
       const mappings = JSON.parse(mappingsJson);
@@ -87,13 +87,13 @@ const determineUserOrganization = async email => {
     } catch (error) {
       log.auth.error('Failed to parse domain mappings JSON', {
         error: error.message,
-        rawValue: config.authentication.external_domain_mappings?.value,
+        rawValue: config.authentication.external_domain_mappings,
       });
     }
   }
 
   const fallbackAction =
-    config.authentication?.external_provisioning_fallback_action?.value || 'require_invite';
+    config.authentication?.external_provisioning_fallback_action || 'require_invite';
   log.auth.debug('Applying fallback policy', { fallbackAction });
 
   switch (fallbackAction) {
@@ -293,7 +293,7 @@ export const handleExternalUser = async (provider, profile) => {
       username: profile.displayName || profile.cn || email.split('@')[0],
       email,
       password_hash: 'external',
-      role: config.authentication?.external_provisioning_default_role?.value || 'user',
+      role: config.authentication?.external_provisioning_default_role || 'user',
       organization_id: organizationId,
       auth_provider: baseProvider,
       external_id: subject,

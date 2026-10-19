@@ -37,15 +37,15 @@ const testSmtpConnection = async (req, res) => {
 
     log.mail.info('Sending test email');
     const info = await transporter.sendMail({
-      from: mailConfig.smtp_from.value,
+      from: mailConfig.smtp_from,
       to: testEmail,
       subject: 'Hyperweaver SMTP Test Email',
       html: `
         <h2>🧪 SMTP Configuration Test</h2>
         <p>This is a test email to verify your Hyperweaver SMTP configuration.</p>
         <p><strong>Timestamp:</strong> ${new Date().toISOString()}</p>
-        <p><strong>From:</strong> ${mailConfig.smtp_from.value}</p>
-        <p><strong>SMTP Host:</strong> ${mailConfig.smtp_host.value}:${mailConfig.smtp_port.value}</p>
+        <p><strong>From:</strong> ${mailConfig.smtp_from}</p>
+        <p><strong>SMTP Host:</strong> ${mailConfig.smtp_host}:${mailConfig.smtp_port}</p>
         <p>✅ If you received this email, your SMTP configuration is working correctly!</p>
       `,
       text: `
@@ -54,8 +54,8 @@ Hyperweaver SMTP Test Email
 This is a test email to verify your Hyperweaver SMTP configuration.
 
 Timestamp: ${new Date().toISOString()}
-From: ${mailConfig.smtp_from.value}
-SMTP Host: ${mailConfig.smtp_host.value}:${mailConfig.smtp_port.value}
+From: ${mailConfig.smtp_from}
+SMTP Host: ${mailConfig.smtp_host}:${mailConfig.smtp_port}
 
 ✅ If you received this email, your SMTP configuration is working correctly!
       `,

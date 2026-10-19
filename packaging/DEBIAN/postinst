@@ -12,23 +12,37 @@ fi
 chown -R hyperweaver-server:hyperweaver-server /opt/hyperweaver-server
 chown -R hyperweaver-server:hyperweaver-server /var/lib/hyperweaver-server
 chown -R hyperweaver-server:hyperweaver-server /var/log/hyperweaver-server
-chown -R hyperweaver-server:hyperweaver-server /etc/hyperweaver-server
 
+chown hyperweaver-server:hyperweaver-server /etc/hyperweaver-server
+chmod 0750 /etc/hyperweaver-server
 
-# Generate JWT secret if it doesn't exist
-if [ ! -f /etc/hyperweaver-server/.jwt-secret ]; then
-    openssl rand -hex 32 > /etc/hyperweaver-server/.jwt-secret
-    chown hyperweaver-server:hyperweaver-server /etc/hyperweaver-server/.jwt-secret
-    chmod 600 /etc/hyperweaver-server/.jwt-secret
-    echo "Generated JWT secret in /etc/hyperweaver-server/.jwt-secret"
-fi
+case "$1" in
+    configure)
+        for config_file in app.config.yaml auth.config.yaml db.config.yaml mail.config.yaml; do
+            if [ ! -f "/etc/hyperweaver-server/$config_file" ]; then
+                if [ -f "/opt/hyperweaver-server/config-templates/$config_file" ]; then
+                    cp "/opt/hyperweaver-server/config-templates/$config_file" "/etc/hyperweaver-server/$config_file"
+                    chown hyperweaver-server:hyperweaver-server "/etc/hyperweaver-server/$config_file"
+                    chmod 600 "/etc/hyperweaver-server/$config_file"
+                    echo "Installed $config_file from its template"
+                fi
+            fi
+        done
 
-# Update config file with actual JWT secret
-if [ -f /etc/hyperweaver-server/.jwt-secret ]; then
-    JWT_SECRET=$(cat /etc/hyperweaver-server/.jwt-secret)
-    sed -i "s/__JWT_SECRET_FROM_FILE__/${JWT_SECRET}/g" /etc/hyperweaver-server/config.yaml
-    echo "Updated config with JWT secret"
-fi
+        if [ -z "$2" ]; then
+            echo "Fresh installation detected"
+            if [ ! -f /etc/hyperweaver-server/setup.token ]; then
+                : > /etc/hyperweaver-server/setup.token
+                chown hyperweaver-server:hyperweaver-server /etc/hyperweaver-server/setup.token
+                chmod 600 /etc/hyperweaver-server/setup.token
+            fi
+        else
+            echo "Upgrade from version $2 detected - migrating configuration files"
+            runuser -u hyperweaver-server -- /usr/bin/node /opt/hyperweaver-server/scripts/migrate-config.js
+            echo "Configuration files in /etc/hyperweaver-server/ migrated; the previous copies sit beside them as .bak"
+        fi
+        ;;
+esac
 
 # Initialize database directory
 mkdir -p /var/lib/hyperweaver-server/database
@@ -47,12 +61,13 @@ echo "======================================================================"
 echo "Hyperweaver Server has been installed successfully!"
 echo ""
 echo "Next steps:"
-echo "1. Review configuration: /etc/hyperweaver-server/config.yaml"
-echo "2. Start the service: systemctl enable --now hyperweaver-server"
-echo "3. Check status: systemctl status hyperweaver-server"
-echo "4. View logs: journalctl -u hyperweaver-server -f"
+echo "1. Start the service: systemctl enable --now hyperweaver-server"
+echo "2. Read the setup token the first start writes: cat /etc/hyperweaver-server/setup.token"
+echo "3. Open https://localhost:3443 and enter the setup token"
+echo "4. Check status: systemctl status hyperweaver-server"
+echo "5. View logs: journalctl -u hyperweaver-server -f"
 echo ""
-echo "Default access: https://localhost:3443 (with self-signed certificate)"
+echo "Configuration files location: /etc/hyperweaver-server/"
 echo "======================================================================"
 echo ""
 

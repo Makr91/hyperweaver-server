@@ -1,0 +1,461 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+title: Application
+schemaVersion: 1
+sections:
+  application:
+    title: Application
+    order: 1
+  server:
+    title: Server
+    order: 2
+  security:
+    title: Security
+    order: 3
+  logging:
+    title: Logging
+    order: 4
+  performance:
+    title: Performance
+    order: 5
+  integrations:
+    title: Integrations
+    order: 6
+properties:
+  schemaVersion:
+    type: integer
+    readOnly: true
+    default: 1
+    title: Schema version
+  frontend:
+    type: object
+    section: application
+    subsection: frontendSettings
+    title: Frontend
+    properties:
+      name:
+        type: string
+        default: Hyperweaver
+        title: Application name
+        order: 1
+      frontend_url:
+        type: string
+        format: uri
+        default: https://localhost:3443
+        title: Public origin
+        description: The origin the UI is served at and the OIDC callbacks return to
+        order: 2
+        requiresRestart: true
+        restartReason: the OIDC redirect URIs are bound at boot
+      trust_proxy:
+        type: integer
+        minimum: 0
+        maximum: 10
+        default: 1
+        title: Trusted proxies
+        description: 0 for a direct connection, 1 behind one proxy, more behind more
+        order: 3
+        requiresRestart: true
+        restartReason: the Express trust proxy setting is applied at boot
+    required:
+      - frontend_url
+  branding:
+    type: object
+    section: application
+    subsection: branding
+    title: Branding
+    properties:
+      datacenter_label:
+        type: string
+        default: Hyperweaver
+        title: Datacenter label
+        description: The name of the aggregate root node in the hosts tree
+        order: 1
+      public_datacenter_label:
+        type: boolean
+        default: true
+        title: Public datacenter label
+        description: Answer the datacenter label on the public status probe before sign-in
+        order: 2
+  server:
+    type: object
+    section: server
+    subsection: listener
+    title: Listener
+    properties:
+      hostname:
+        type: string
+        default: localhost
+        title: Hostname
+        order: 1
+        requiresRestart: true
+        restartReason: the listener is bound at boot
+      port:
+        type: integer
+        minimum: 1
+        maximum: 65535
+        default: 3443
+        title: Port
+        order: 2
+        requiresRestart: true
+        restartReason: the listener is bound at boot
+      ssl_enabled:
+        type: boolean
+        default: true
+        title: HTTPS
+        order: 3
+        requiresRestart: true
+        restartReason: the listener is bound at boot
+      ssl_generate:
+        type: boolean
+        default: true
+        title: Generate a certificate
+        description: Generate a self-signed certificate when the pair is missing
+        dependsOn: ssl_enabled
+        showWhen:
+          - true
+        order: 4
+        requiresRestart: true
+        restartReason: the certificate is read at boot
+      ssl_key_path:
+        type: string
+        default: /etc/hyperweaver-server/ssl/key.pem
+        title: Private key
+        dependsOn: ssl_enabled
+        showWhen:
+          - true
+        order: 5
+        requiresRestart: true
+        restartReason: the certificate is read at boot
+        action:
+          kind: upload
+          route: /api/config/app/upload
+          method: POST
+      ssl_cert_path:
+        type: string
+        default: /etc/hyperweaver-server/ssl/cert.pem
+        title: Certificate
+        dependsOn: ssl_enabled
+        showWhen:
+          - true
+        order: 6
+        requiresRestart: true
+        restartReason: the certificate is read at boot
+        action:
+          kind: upload
+          route: /api/config/app/upload
+          method: POST
+      ssl_ca_path:
+        type: string
+        default: ''
+        title: Certificate authority
+        dependsOn: ssl_enabled
+        showWhen:
+          - true
+        order: 7
+        requiresRestart: true
+        restartReason: the certificate is read at boot
+        action:
+          kind: upload
+          route: /api/config/app/upload
+          method: POST
+      force_secure:
+        type: boolean
+        default: true
+        title: Force HTTPS
+        description: The plain HTTP port serves only 308 redirects to the HTTPS listener
+        dependsOn: ssl_enabled
+        showWhen:
+          - true
+        order: 8
+        requiresRestart: true
+        restartReason: the listeners are bound at boot
+    required:
+      - hostname
+      - port
+  security:
+    type: object
+    section: security
+    subsection: cors
+    title: CORS
+    properties:
+      cors:
+        type: object
+        properties:
+          whitelist:
+            type: array
+            items:
+              type: string
+              format: uri
+            default:
+              - https://localhost:3443
+              - https://localhost
+            title: Allowed origins
+            description: Origins allowed to call the API from a browser
+            order: 1
+            requiresRestart: true
+            restartReason: the CORS middleware is built at boot
+          credentials:
+            type: boolean
+            default: true
+            title: Allow credentials
+            order: 2
+            requiresRestart: true
+            restartReason: the CORS middleware is built at boot
+  logging:
+    type: object
+    section: logging
+    subsection: generalSettings
+    title: General
+    properties:
+      level:
+        type: string
+        enum:
+          - error
+          - warn
+          - info
+          - debug
+          - silent
+        default: info
+        title: Log level
+        order: 1
+        requiresRestart: true
+        restartReason: the loggers are created at boot
+      console_enabled:
+        type: boolean
+        default: true
+        title: Console output
+        order: 2
+        requiresRestart: true
+        restartReason: the loggers are created at boot
+      log_directory:
+        type: string
+        default: /var/log/hyperweaver-server
+        title: Log directory
+        order: 3
+        requiresRestart: true
+        restartReason: the loggers are created at boot
+      performance_threshold_ms:
+        type: integer
+        minimum: 100
+        maximum: 10000
+        default: 1000
+        title: Slow operation threshold (ms)
+        order: 4
+      file_rotation:
+        type: object
+        subsection: rotation
+        title: Rotation
+        properties:
+          max_size:
+            type: integer
+            minimum: 10
+            maximum: 500
+            default: 50
+            title: Maximum file size (MB)
+            order: 1
+            requiresRestart: true
+            restartReason: the loggers are created at boot
+          max_files:
+            type: integer
+            minimum: 1
+            maximum: 30
+            default: 5
+            title: Files kept
+            order: 2
+            requiresRestart: true
+            restartReason: the loggers are created at boot
+      categories:
+        type: object
+        subsection: categories
+        title: Categories
+        additionalProperties:
+          type: string
+          enum:
+            - error
+            - warn
+            - info
+            - debug
+          requiresRestart: true
+          restartReason: the loggers are created at boot
+  limits:
+    type: object
+    section: performance
+    subsection: generalLimits
+    title: Limits
+    properties:
+      max_servers_per_user:
+        type: integer
+        minimum: 1
+        maximum: 1000
+        default: 10
+        title: Maximum servers per user
+        order: 1
+      api_timeouts:
+        type: object
+        subsection: apiTimeouts
+        title: Agent Request Timeouts
+        properties:
+          default_request:
+            type: integer
+            minimum: 5000
+            maximum: 600000
+            default: 60000
+            title: Default request timeout (ms)
+            order: 1
+          file_upload:
+            type: integer
+            minimum: 300000
+            maximum: 7200000
+            default: 1800000
+            title: File upload timeout (ms)
+            order: 2
+      file_uploads:
+        type: object
+        subsection: fileUploads
+        title: File Uploads
+        properties:
+          max_file_size_gb:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 50
+            title: Maximum upload size (GB)
+            order: 1
+  rate_limiting:
+    type: object
+    section: performance
+    subsection: rateLimiting
+    title: Rate Limiting
+    properties:
+      window_minutes:
+        type: integer
+        minimum: 1
+        maximum: 60
+        default: 15
+        title: Window (minutes)
+        order: 1
+        requiresRestart: true
+        restartReason: the limiters are created at boot
+      max_requests:
+        type: integer
+        minimum: 100
+        maximum: 100000
+        default: 1000
+        title: Requests per window
+        order: 2
+        requiresRestart: true
+        restartReason: the limiters are created at boot
+      auth_max_requests:
+        type: integer
+        minimum: 5
+        maximum: 1000
+        default: 25
+        title: Sign-in attempts per window
+        order: 3
+        requiresRestart: true
+        restartReason: the limiters are created at boot
+      file_operations_max_requests:
+        type: integer
+        minimum: 1000
+        maximum: 100000
+        default: 5000
+        title: Page and file requests per window
+        order: 4
+        requiresRestart: true
+        restartReason: the limiters are created at boot
+      proxy_max_requests:
+        type: integer
+        minimum: 10
+        maximum: 100000
+        default: 2000
+        title: Agent proxy requests per window
+        order: 5
+        requiresRestart: true
+        restartReason: the limiters are created at boot
+      message:
+        type: string
+        default: Too many requests from this IP, please try again later.
+        title: Refusal message
+        order: 6
+      skip_successful_requests:
+        type: boolean
+        default: false
+        title: Skip successful requests
+        order: 7
+      skip_failed_requests:
+        type: boolean
+        default: false
+        title: Skip failed requests
+        order: 8
+
+  agents:
+    type: object
+    section: performance
+    subsection: agents
+    title: Agents
+    properties:
+      poll_timeout:
+        type: integer
+        minimum: 1000
+        maximum: 60000
+        default: 5000
+        title: Status probe timeout (ms)
+        description: How long a status probe of an agent waits before it fails
+        order: 1
+  integrations:
+    type: object
+    section: integrations
+    subsection: boxvault
+    title: Integrations
+    properties:
+      boxvault:
+        type: object
+        properties:
+          url:
+            type: string
+            default: ''
+            title: BoxVault URL
+            description: Base URL of the BoxVault instance; requests to /api/boxvault/* are forwarded there with the signed-in person's own token; empty disables the proxy
+            order: 1
+      gravatar:
+        type: object
+        subsection: gravatar
+        title: Gravatar
+        properties:
+          api_key:
+            type: string
+            writeOnly: true
+            default: ''
+            title: Gravatar API key
+            order: 1
+  ticket_system:
+    type: object
+    section: integrations
+    subsection: ticketSystem
+    title: Ticket System
+    properties:
+      enabled:
+        type: boolean
+        default: false
+        title: Enabled
+        order: 1
+      base_url:
+        type: string
+        default: ''
+        title: Base URL
+        order: 2
+      req_type:
+        type: string
+        default: sso
+        title: Request type
+        order: 3
+      context:
+        type: string
+        default: https://github.com/Makr91/hyperweaver-server
+        title: Context
+        order: 4
+      fallback_customer_id:
+        type: string
+        default: ''
+        title: Fallback customer id
+        order: 5

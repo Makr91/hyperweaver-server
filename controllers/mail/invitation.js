@@ -37,7 +37,7 @@ export const sendInvitationEmail = async invitation => {
     log.mail.debug('Preparing invitation email');
 
     const mailOptions = {
-      from: mailConfig.smtp_from.value,
+      from: mailConfig.smtp_from,
       to: invitation.email,
       subject: `Hyperweaver Organization Invitation - ${organizationName}`,
       html: `

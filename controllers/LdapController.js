@@ -1,5 +1,7 @@
 import jwt from 'jsonwebtoken';
-import { config } from '../index.js';
+import { loadConfig } from '../utils/config.js';
+
+const config = loadConfig();
 import { log } from '../utils/Logger.js';
 import { testLdapConnection } from '../auth/ldapClient.js';
 
@@ -62,7 +64,7 @@ class LdapController {
   static async ldapLogin(req, res) {
     try {
       // Check if LDAP is enabled
-      if (!config.authentication?.ldap_enabled?.value) {
+      if (!config.authentication?.ldap_enabled) {
         return res.status(400).json({
           success: false,
           message: 'LDAP authentication is not enabled',
@@ -106,7 +108,7 @@ class LdapController {
           role: user.role,
           auth_provider: 'ldap',
         },
-        config.authentication.jwt_secret.value,
+        config.authentication.jwt_secret,
         { expiresIn: '24h' }
       );
 
@@ -279,7 +281,7 @@ class LdapController {
   static async testLdap(req, res) {
     try {
       // Check if LDAP is enabled
-      if (!config.authentication?.ldap_enabled?.value) {
+      if (!config.authentication?.ldap_enabled) {
         return res.status(400).json({
           success: false,
           message: 'LDAP authentication is not enabled',

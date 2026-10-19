@@ -23,15 +23,15 @@ const enabledAuthMethods = config => {
   const auth = config.authentication || {};
   const methods = [];
 
-  if (auth.local_enabled?.value !== false) {
+  if (auth.local_enabled !== false) {
     methods.push('local');
   }
-  if (auth.ldap_enabled?.value === true) {
+  if (auth.ldap_enabled === true) {
     methods.push('ldap');
   }
 
-  const oidcProviders = auth.oidc_providers?.value || {};
-  if (Object.values(oidcProviders).some(provider => provider?.enabled?.value)) {
+  const oidcProviders = auth.oidc_providers || {};
+  if (Object.values(oidcProviders).some(provider => provider?.enabled)) {
     methods.push('oidc');
   }
 
@@ -80,8 +80,8 @@ class StatusController {
     // C6: expose the aggregate-root label pre-auth ONLY when the operator opts in
     // (public_datacenter_label). When off, the UI falls back to a generic label pre-auth and
     // reads the real one post-login from /api/auth/verify.
-    if (config.branding?.public_datacenter_label?.value) {
-      payload.datacenter_label = config.branding?.datacenter_label?.value || 'Hyperweaver';
+    if (config.branding?.public_datacenter_label) {
+      payload.datacenter_label = config.branding?.datacenter_label || 'Hyperweaver';
     }
     res.json(payload);
   }

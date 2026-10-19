@@ -4,68 +4,28 @@
  */
 
 import rateLimit from 'express-rate-limit';
-import { loadConfig } from '../utils/config.js';
+import { getRateLimitConfig } from '../utils/config-loader.js';
 
-const config = loadConfig();
+const rateLimitConfig = getRateLimitConfig();
+const windowMs = rateLimitConfig.window_minutes * 60 * 1000;
 
-/** Authentication - Strict (prevent brute force attacks) */
-export const authLimiter = rateLimit({
-  windowMs: config.limits?.authentication?.windowMs?.value || 15 * 60 * 1000,
-  limit: config.limits?.authentication?.max?.value || 25,
-  message: {
-    error:
-      config.limits?.authentication?.message?.value ||
-      'Too many authentication attempts, please try again later',
-  },
-  standardHeaders: true,
-  legacyHeaders: false,
-});
+const limiter = limit =>
+  rateLimit({
+    windowMs,
+    limit,
+    message: { error: rateLimitConfig.message },
+    standardHeaders: true,
+    legacyHeaders: false,
+    skipSuccessfulRequests: rateLimitConfig.skip_successful_requests,
+    skipFailedRequests: rateLimitConfig.skip_failed_requests,
+  });
 
-/** Admin operations - Moderate (protect admin functions) */
-export const adminLimiter = rateLimit({
-  windowMs: config.limits?.admin?.windowMs?.value || 15 * 60 * 1000,
-  limit: config.limits?.admin?.max?.value || 500,
-  message: {
-    error:
-      config.limits?.admin?.message?.value || 'Too many admin requests, please try again later',
-  },
-  standardHeaders: true,
-  legacyHeaders: false,
-});
+export const authLimiter = limiter(rateLimitConfig.auth_max_requests);
 
-/** External API proxy - Restrictive (protect downstream agents) */
-export const apiProxyLimiter = rateLimit({
-  windowMs: config.limits?.apiProxy?.windowMs?.value || 60 * 1000,
-  limit: config.limits?.apiProxy?.max?.value || 2000,
-  message: {
-    error:
-      config.limits?.apiProxy?.message?.value ||
-      'Too many API proxy requests, please try again later',
-  },
-  standardHeaders: true,
-  legacyHeaders: false,
-});
+export const adminLimiter = limiter(rateLimitConfig.max_requests);
 
-/** Standard operations - Normal (general purpose) */
-export const standardLimiter = rateLimit({
-  windowMs: config.limits?.standard?.windowMs?.value || 15 * 60 * 1000,
-  limit: config.limits?.standard?.max?.value || 1000,
-  message: {
-    error: config.limits?.standard?.message?.value || 'Too many requests, please try again later',
-  },
-  standardHeaders: true,
-  legacyHeaders: false,
-});
+export const apiProxyLimiter = limiter(rateLimitConfig.proxy_max_requests);
 
-/** Static file serving - High limit (prevent file system abuse, CodeQL flagged endpoints) */
-export const staticFileLimiter = rateLimit({
-  windowMs: config.limits?.staticFiles?.windowMs?.value || 15 * 60 * 1000,
-  limit: config.limits?.staticFiles?.max?.value || 5000,
-  message: {
-    error:
-      config.limits?.staticFiles?.message?.value ||
-      'Too many static file requests, please try again later',
-  },
-  standardHeaders: true,
-  legacyHeaders: false,
-});
+export const standardLimiter = limiter(rateLimitConfig.max_requests);
+
+export const staticFileLimiter = limiter(rateLimitConfig.file_operations_max_requests);

@@ -1,6 +1,8 @@
 import db from '../../models/index.js';
 import jwt from 'jsonwebtoken';
-import { config } from '../../index.js';
+import { loadConfig } from '../../utils/config.js';
+
+const config = loadConfig();
 import { log } from '../../utils/Logger.js';
 import { buildRpLogoutUrl, revokeOidcGrant } from '../../auth/oidcLogout.js';
 
@@ -112,7 +114,7 @@ export const login = async (req, res) => {
         role: user.role,
         auth_provider: authProvider,
       },
-      config.authentication.jwt_secret.value,
+      config.authentication.jwt_secret,
       { expiresIn: '24h' }
     );
 

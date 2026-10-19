@@ -1,6 +1,8 @@
 import db from '../models/index.js';
 import MailController from './MailController.js';
-import { config } from '../index.js';
+import { loadConfig } from '../utils/config.js';
+
+const config = loadConfig();
 import { log } from '../utils/Logger.js';
 
 // Access Sequelize models
@@ -86,7 +88,7 @@ const resolveRegistrationOrganization = async (
       };
     }
 
-    if (!config.authentication?.local_allow_new_organizations?.value) {
+    if (!config.authentication?.local_allow_new_organizations) {
       return {
         organizationId: null,
         userRole: 'user',
@@ -262,7 +264,7 @@ class RegistrationController {
       if (
         !isFirstUser &&
         !inviteCode &&
-        config.authentication?.local_registration_enabled?.value === false
+        config.authentication?.local_registration_enabled === false
       ) {
         return res.status(403).json({
           success: false,

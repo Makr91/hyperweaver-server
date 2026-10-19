@@ -59,9 +59,9 @@ const resolveRequestTimeout = (options, isFileUpload) => {
   }
   const config = loadConfig();
   if (isFileUpload) {
-    return config.limits?.api_timeouts?.file_upload?.value || 1800000;
+    return config.limits?.api_timeouts?.file_upload || 1800000;
   }
-  return config.limits?.api_timeouts?.default_request?.value || 60000;
+  return config.limits?.api_timeouts?.default_request || 60000;
 };
 
 /**

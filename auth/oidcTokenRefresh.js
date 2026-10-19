@@ -32,8 +32,7 @@ const oidcTokenRefresh = async (req, res, next) => {
   }
 
   const config = loadConfig();
-  const refreshThresholdMinutes =
-    config.authentication?.oidc_token_refresh_threshold_minutes?.value || 5;
+  const refreshThresholdMinutes = config.authentication?.oidc_token_refresh_threshold_minutes || 5;
   const refreshThreshold = refreshThresholdMinutes * 60 * 1000;
 
   // Still comfortably valid — nothing to do.
@@ -43,7 +42,7 @@ const oidcTokenRefresh = async (req, res, next) => {
 
   const providerName = oidc.provider.replace('oidc-', '');
   const oidcConfig = getOidcConfiguration(providerName);
-  const providerConfig = config.authentication?.oidc_providers?.value?.[providerName];
+  const providerConfig = config.authentication?.oidc_providers?.[providerName];
 
   if (!oidcConfig || !providerConfig) {
     log.auth.warn('OIDC token refresh skipped: provider config unavailable', { providerName });
@@ -52,9 +51,9 @@ const oidcTokenRefresh = async (req, res, next) => {
 
   try {
     const tokenEndpoint = oidcConfig.serverMetadata().token_endpoint;
-    const clientId = providerConfig.client_id?.value;
-    const clientSecret = providerConfig.client_secret?.value;
-    const authMethod = providerConfig.token_endpoint_auth_method?.value || 'client_secret_basic';
+    const clientId = providerConfig.client_id;
+    const clientSecret = providerConfig.client_secret;
+    const authMethod = providerConfig.token_endpoint_auth_method || 'client_secret_basic';
 
     const params = new URLSearchParams({
       grant_type: 'refresh_token',

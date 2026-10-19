@@ -34,12 +34,12 @@ const oidcConfigurations = new Map();
  * @param {Object} providerConfig - Provider configuration object
  */
 const setupSingleOidcProvider = async (providerName, providerConfig) => {
-  const displayName = providerConfig.display_name?.value;
-  const issuer = providerConfig.issuer?.value;
-  const clientId = providerConfig.client_id?.value;
-  const clientSecret = providerConfig.client_secret?.value;
-  const scope = providerConfig.scope?.value || 'openid profile email';
-  const responseType = providerConfig.response_type?.value || 'code';
+  const displayName = providerConfig.display_name;
+  const { issuer } = providerConfig;
+  const clientId = providerConfig.client_id;
+  const clientSecret = providerConfig.client_secret;
+  const scope = providerConfig.scope || 'openid profile email';
+  const responseType = providerConfig.response_type || 'code';
 
   log.auth.info('Setting up OIDC provider', {
     providerName,
@@ -66,7 +66,7 @@ const setupSingleOidcProvider = async (providerName, providerConfig) => {
         name: strategyName,
         config: oidcConfig,
         scope,
-        callbackURL: `${config.frontend.frontend_url.value}/api/auth/oidc/callback`,
+        callbackURL: `${config.frontend.frontend_url}/api/auth/oidc/callback`,
         passReqToCallback: true,
       },
       async (req, tokens, verified) => {
@@ -143,7 +143,7 @@ export const setupOidcProviders = async () => {
     });
   }
 
-  const oidcProvidersConfig = config.authentication?.oidc_providers?.value || {};
+  const oidcProvidersConfig = config.authentication?.oidc_providers || {};
 
   if (!oidcProvidersConfig || Object.keys(oidcProvidersConfig).length === 0) {
     log.auth.info('No OIDC providers configured');
@@ -156,13 +156,13 @@ export const setupOidcProviders = async () => {
 
   const providerEntries = Object.entries(oidcProvidersConfig).filter(
     ([providerName, providerConfig]) => {
-      if (!providerConfig.enabled?.value) {
+      if (!providerConfig.enabled) {
         log.auth.info('Skipping disabled OIDC provider', { providerName });
         return false;
       }
-      const issuer = providerConfig.issuer?.value;
-      const clientId = providerConfig.client_id?.value;
-      const clientSecret = providerConfig.client_secret?.value;
+      const { issuer } = providerConfig;
+      const clientId = providerConfig.client_id;
+      const clientSecret = providerConfig.client_secret;
       if (!issuer || !clientId || !clientSecret) {
         log.auth.error('Invalid OIDC provider configuration: missing required fields', {
           providerName,

@@ -1,0 +1,364 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+title: Authentication
+schemaVersion: 1
+sections:
+  authentication:
+    title: Authentication
+    order: 1
+properties:
+  schemaVersion:
+    type: integer
+    readOnly: true
+    default: 1
+    title: Schema version
+  authentication:
+    type: object
+    section: authentication
+    subsection: jwtSettings
+    title: Sessions
+    properties:
+      jwt_secret:
+        type: string
+        writeOnly: true
+        default: ''
+        title: Session secret
+        description: Secret signing every session token; generated on first start when empty
+        order: 1
+        requiresRestart: true
+        restartReason: the session store is keyed by the secret at boot
+      jwt_expiration:
+        type: string
+        default: 24h
+        title: Session lifetime
+        description: Session token lifetime, such as 24h, 7d or 1h
+        order: 2
+      jwt_issuer:
+        type: string
+        default: hyperweaver-server
+        title: Issuer claim
+        order: 3
+        requiresRestart: true
+        restartReason: every session token minted before the change stops verifying
+      jwt_audience:
+        type: string
+        default: hyperweaver-ui
+        title: Audience claim
+        order: 4
+        requiresRestart: true
+        restartReason: every session token minted before the change stops verifying
+      local_enabled:
+        type: boolean
+        default: true
+        title: Local accounts
+        description: Enable username and password sign-in
+        subsection: localAuthentication
+        order: 1
+      local_registration_enabled:
+        type: boolean
+        default: true
+        title: Self-service registration
+        description: Allow local account registration; the first-user bootstrap and invited registrations are always allowed
+        subsection: localAuthentication
+        order: 2
+      local_require_email_verification:
+        type: boolean
+        default: false
+        title: Require email verification
+        subsection: localAuthentication
+        order: 3
+      local_password_min_length:
+        type: integer
+        minimum: 4
+        maximum: 128
+        default: 8
+        title: Minimum password length
+        subsection: localAuthentication
+        order: 4
+      local_password_require_uppercase:
+        type: boolean
+        default: false
+        title: Require uppercase
+        subsection: localAuthentication
+        order: 5
+      local_password_require_lowercase:
+        type: boolean
+        default: false
+        title: Require lowercase
+        subsection: localAuthentication
+        order: 6
+      local_password_require_numbers:
+        type: boolean
+        default: false
+        title: Require numbers
+        subsection: localAuthentication
+        order: 7
+      local_password_require_symbols:
+        type: boolean
+        default: false
+        title: Require symbols
+        subsection: localAuthentication
+        order: 8
+      local_bcrypt_rounds:
+        type: integer
+        minimum: 8
+        maximum: 15
+        default: 10
+        title: Bcrypt rounds
+        subsection: localAuthentication
+        order: 9
+      local_session_timeout:
+        type: integer
+        minimum: 1
+        maximum: 168
+        default: 24
+        title: Session timeout (hours)
+        subsection: localAuthentication
+        order: 10
+      local_allow_new_organizations:
+        type: boolean
+        default: true
+        title: Allow new organizations at registration
+        subsection: localAuthentication
+        order: 11
+      ldap_enabled:
+        type: boolean
+        default: false
+        title: LDAP sign-in
+        subsection: ldapConfiguration
+        order: 1
+        requiresRestart: true
+        restartReason: the LDAP strategy is registered at boot
+      ldap_url:
+        type: string
+        default: ldap://localhost:389
+        title: LDAP URL
+        description: ldap:// for plain, ldaps:// for TLS
+        subsection: ldapConfiguration
+        dependsOn: ldap_enabled
+        showWhen:
+          - true
+        order: 2
+      ldap_bind_dn:
+        type: string
+        default: ''
+        title: Bind DN
+        subsection: ldapConfiguration
+        dependsOn: ldap_enabled
+        showWhen:
+          - true
+        order: 3
+      ldap_bind_credentials:
+        type: string
+        writeOnly: true
+        default: ''
+        title: Bind password
+        subsection: ldapConfiguration
+        dependsOn: ldap_enabled
+        showWhen:
+          - true
+        order: 4
+      ldap_search_base:
+        type: string
+        default: ''
+        title: Search base
+        subsection: ldapConfiguration
+        dependsOn: ldap_enabled
+        showWhen:
+          - true
+        order: 5
+      ldap_search_filter:
+        type: string
+        default: (uid={{username}})
+        title: Search filter
+        description: '{{username}} is replaced by the presented username'
+        subsection: ldapConfiguration
+        dependsOn: ldap_enabled
+        showWhen:
+          - true
+        order: 6
+      ldap_search_attributes:
+        type: string
+        default: displayName,mail,memberOf
+        title: Attributes
+        description: Comma-separated attributes to read
+        subsection: ldapConfiguration
+        dependsOn: ldap_enabled
+        showWhen:
+          - true
+        order: 7
+      ldap_tls_reject_unauthorized:
+        type: boolean
+        default: false
+        title: Reject unauthorized TLS
+        subsection: ldapConfiguration
+        dependsOn: ldap_enabled
+        showWhen:
+          - true
+        order: 8
+      oidc_token_refresh_threshold_minutes:
+        type: integer
+        minimum: 1
+        maximum: 60
+        default: 5
+        title: Token refresh threshold (minutes)
+        description: Refresh the identity provider token this many minutes before it expires
+        subsection: oidcProviders
+        order: 1
+      oidc_providers:
+        type: object
+        subsection: oidcProviders
+        title: OIDC Providers
+        description: Adding, editing or removing a provider requires a restart
+        order: 2
+        additionalProperties:
+          type: object
+          properties:
+            enabled:
+              type: boolean
+              default: true
+              title: Enabled
+              order: 1
+              requiresRestart: true
+              restartReason: the provider is discovered at boot
+            display_name:
+              type: string
+              minLength: 1
+              pattern: \S
+              title: Display name
+              order: 2
+            issuer:
+              type: string
+              format: uri
+              title: Issuer URL
+              order: 3
+              requiresRestart: true
+              restartReason: the provider is discovered at boot
+            client_id:
+              type: string
+              minLength: 1
+              pattern: \S
+              title: Client ID
+              order: 4
+              requiresRestart: true
+              restartReason: the provider is discovered at boot
+            client_secret:
+              type: string
+              writeOnly: true
+              title: Client secret
+              order: 5
+              requiresRestart: true
+              restartReason: the provider is discovered at boot
+            scope:
+              type: string
+              default: openid profile email
+              title: Scope
+              order: 6
+            token_endpoint_auth_method:
+              type: string
+              enum:
+                - client_secret_basic
+                - client_secret_post
+                - none
+              default: client_secret_basic
+              title: Token endpoint auth method
+              order: 7
+            prompt:
+              type: string
+              default: ''
+              title: Prompt
+              order: 8
+          required:
+            - display_name
+            - issuer
+            - client_id
+            - client_secret
+
+      external_domain_mapping_enabled:
+        type: boolean
+        default: false
+        title: Domain mapping
+        description: Assign organizations automatically from the email domain
+        subsection: externalProviders
+        order: 1
+      external_domain_mappings:
+        type: string
+        default: '{}'
+        title: Domain mappings
+        description: 'JSON mapping of organization codes to email domains: {"ORG001": ["example.com"]}'
+        subsection: externalProviders
+        dependsOn: external_domain_mapping_enabled
+        showWhen:
+          - true
+        order: 2
+      external_provisioning_enabled:
+        type: boolean
+        default: false
+        title: Provisioning
+        description: Provision users automatically at external authentication
+        subsection: externalProviders
+        order: 3
+      external_provisioning_policy:
+        type: string
+        enum:
+          - invite_only
+          - auto_provision
+          - manual_approval
+          - disabled
+        default: invite_only
+        title: Provisioning policy
+        subsection: externalProviders
+        dependsOn: external_provisioning_enabled
+        showWhen:
+          - true
+        order: 4
+      external_provisioning_default_role:
+        type: string
+        enum:
+          - user
+          - admin
+          - super-admin
+        default: user
+        title: Default role
+        subsection: externalProviders
+        dependsOn: external_provisioning_enabled
+        showWhen:
+          - true
+        order: 5
+      external_provisioning_fallback_action:
+        type: string
+        enum:
+          - require_invite
+          - create_org
+          - deny_access
+        default: require_invite
+        title: Fallback action
+        description: Action when no organization mapping matches
+        subsection: externalProviders
+        dependsOn: external_provisioning_enabled
+        showWhen:
+          - true
+        order: 6
+      external_profile_sync_enabled:
+        type: boolean
+        default: true
+        title: Profile sync
+        subsection: externalProviders
+        order: 7
+      external_profile_update_on_login:
+        type: boolean
+        default: true
+        title: Profile update at login
+        subsection: externalProviders
+        dependsOn: external_profile_sync_enabled
+        showWhen:
+          - true
+        order: 8
+      external_profile_sync_fields:
+        type: string
+        default: displayName,email,groups
+        title: Synced fields
+        subsection: externalProviders
+        dependsOn: external_profile_sync_enabled
+        showWhen:
+          - true
+        order: 9

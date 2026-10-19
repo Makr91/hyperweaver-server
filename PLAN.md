@@ -86,7 +86,6 @@ Rules that bind every change:
 - `refreshStatus` stores the agent's whole status payload as `capabilities`
 - `utils/orgAccess.js` route allowlist entries keep their agent-relative paths
 
-
 ## 9. Favorites, notifications, search
 
 - Copy `routes/favorites.routes.js`, `controllers/favorites/user.js`, `routes/notification.routes.js`, `controllers/notification.controller.js` (the push, subscription and test routes answer 503 not-configured the way `notifications.go` does; `utils/notifyHub.js` not copied)
@@ -123,4 +122,3 @@ Rules that bind every change:
 
 - `npm run format && npm run lint:fix`
 - `npm start` against a development `config/*.dev.config.yaml`, `GET /api/status`, `GET /api/health`, `GET /api/rules`, a signin, `GET /api/user`, `GET /api/events?topics=session,hosts`
-

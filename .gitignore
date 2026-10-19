@@ -47,6 +47,9 @@ modal_conversion_scratchpad.md
 # Runtime artifacts + local dev config + SQLite DB (created when the app runs — never commit)
 logs/
 /config.yaml
+/config/local/
+/config/setup.token
+/ssl/
 /data/
 
 # Generated at build by scripts/generate-docs.js and published as a release asset.

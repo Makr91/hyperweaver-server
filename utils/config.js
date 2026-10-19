@@ -1,38 +1,11 @@
-import fs from 'fs';
-import * as YAML from 'yaml';
+import { CONFIG_NAMES, loadConfig as loadFile } from './config-loader.js';
 
 /**
- * Get the config file path, checking environment variable first, then fallback
- * @returns {string} Path to config.yaml file
+ * The filled documents of every configuration file merged into one object,
+ * so a reader asks for `config.authentication.jwt_secret` without naming
+ * the file the key lives in.
+ * @returns {Object} The merged configuration
  */
-const getConfigPath = () => {
-  // Check environment variable first (set by systemd)
-  if (process.env.CONFIG_PATH) {
-    return process.env.CONFIG_PATH;
-  }
+export const loadConfig = () => Object.assign({}, ...CONFIG_NAMES.map(name => loadFile(name)));
 
-  // Fallback to local config for development
-  return './config.yaml';
-};
-
-/**
- * Load and parse the configuration file
- * @returns {Object} Parsed configuration object
- */
-export const loadConfig = () => {
-  try {
-    const configPath = getConfigPath();
-    const configFile = fs.readFileSync(configPath, 'utf8');
-    return YAML.parse(configFile);
-  } catch (error) {
-    console.error('Failed to load configuration:', error.message);
-    console.error('Tried path:', getConfigPath());
-    throw error;
-  }
-};
-
-/**
- * Get the configuration file path for external use
- * @returns {string} Configuration file path
- */
-export const getConfigFilePath = () => getConfigPath();
+export { loadFile };

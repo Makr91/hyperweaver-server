@@ -1,5 +1,7 @@
 import jwt from 'jsonwebtoken';
-import { config } from '../index.js';
+import { loadConfig } from '../utils/config.js';
+
+const config = loadConfig();
 import { log } from '../utils/Logger.js';
 import { verifyLogoutToken } from '../auth/oidcLogout.js';
 import db from '../models/index.js';
@@ -48,7 +50,7 @@ class OidcController {
       }
 
       // Get OIDC providers from nested configuration structure
-      const oidcProvidersConfig = config.authentication?.oidc_providers?.value || {};
+      const oidcProvidersConfig = config.authentication?.oidc_providers || {};
 
       // Find the specific provider
       const providerConfig = oidcProvidersConfig[provider];
@@ -60,7 +62,7 @@ class OidcController {
         });
       }
 
-      if (!providerConfig.enabled?.value) {
+      if (!providerConfig.enabled) {
         return res.status(400).json({
           success: false,
           message: `OIDC provider '${provider}' is not enabled`,
@@ -186,7 +188,7 @@ class OidcController {
       }
 
       // Get OIDC providers from nested configuration structure
-      const oidcProvidersConfig = config.authentication?.oidc_providers?.value || {};
+      const oidcProvidersConfig = config.authentication?.oidc_providers || {};
 
       // Find the specific provider
       const providerConfig = oidcProvidersConfig[provider];
@@ -195,7 +197,7 @@ class OidcController {
         return res.redirect(`/ui/login?error=provider_not_found&provider=${provider}`);
       }
 
-      if (!providerConfig.enabled?.value) {
+      if (!providerConfig.enabled) {
         return res.redirect(`/ui/login?error=provider_disabled&provider=${provider}`);
       }
 
@@ -261,8 +263,8 @@ class OidcController {
             role: user.role,
             auth_provider: `oidc-${provider}`,
           },
-          config.authentication.jwt_secret.value,
-          { expiresIn: config.authentication.jwt_expiration?.value || '24h' }
+          config.authentication.jwt_secret,
+          { expiresIn: config.authentication.jwt_expiration || '24h' }
         );
 
         // Set session if using express-session
@@ -402,11 +404,11 @@ class OidcController {
   static getOidcIssuers(req, res) {
     void req;
     try {
-      const oidcProviders = config.authentication?.oidc_providers?.value || {};
+      const oidcProviders = config.authentication?.oidc_providers || {};
       const issuers = [];
       Object.entries(oidcProviders).forEach(([providerName, providerConfig]) => {
-        if (providerConfig.enabled?.value && providerConfig.issuer?.value) {
-          issuers.push({ provider: providerName, issuer: providerConfig.issuer.value });
+        if (providerConfig.enabled && providerConfig.issuer) {
+          issuers.push({ provider: providerName, issuer: providerConfig.issuer });
         }
       });
       return res.json({ issuers });

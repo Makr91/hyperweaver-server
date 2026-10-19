@@ -1,0 +1,163 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+title: Database
+schemaVersion: 1
+sections:
+  database:
+    title: Database
+    order: 1
+properties:
+  schemaVersion:
+    type: integer
+    readOnly: true
+    default: 1
+    title: Schema version
+  database:
+    type: object
+    section: database
+    subsection: generalSettings
+    title: General
+    properties:
+      dialect:
+        type: string
+        enum:
+          - sqlite
+          - mysql
+          - postgresql
+          - mariadb
+        default: sqlite
+        title: Dialect
+        description: SQLite for simple deployments, MySQL, PostgreSQL or MariaDB for production
+        order: 1
+        requiresRestart: true
+        restartReason: the database connection is opened at boot
+      storage:
+        type: string
+        default: /var/lib/hyperweaver-server/database/hyperweaver-server.db
+        title: SQLite file
+        description: SQLite database file path
+        dependsOn: dialect
+        showWhen:
+          - sqlite
+        order: 2
+        requiresRestart: true
+        restartReason: the database connection is opened at boot
+      host:
+        type: string
+        format: hostname
+        default: localhost
+        title: Host
+        description: Database server hostname or IP address
+        dependsOn: dialect
+        showWhen:
+          - mysql
+          - postgresql
+          - mariadb
+        order: 3
+        requiresRestart: true
+        restartReason: the database connection is opened at boot
+      port:
+        type: integer
+        minimum: 1
+        maximum: 65535
+        default: 3306
+        title: Port
+        description: Database server port
+        dependsOn: dialect
+        showWhen:
+          - mysql
+          - postgresql
+          - mariadb
+        order: 4
+        requiresRestart: true
+        restartReason: the database connection is opened at boot
+      user:
+        type: string
+        default: hyperweaver_server
+        title: User
+        description: Database username
+        dependsOn: dialect
+        showWhen:
+          - mysql
+          - postgresql
+          - mariadb
+        order: 5
+        requiresRestart: true
+        restartReason: the database connection is opened at boot
+      password:
+        type: string
+        writeOnly: true
+        default: ''
+        title: Password
+        description: Database password
+        dependsOn: dialect
+        showWhen:
+          - mysql
+          - postgresql
+          - mariadb
+        order: 6
+        requiresRestart: true
+        restartReason: the database connection is opened at boot
+      database_name:
+        type: string
+        default: hyperweaver_server
+        title: Database name
+        description: Name of the database to connect to
+        dependsOn: dialect
+        showWhen:
+          - mysql
+          - postgresql
+          - mariadb
+        order: 7
+        requiresRestart: true
+        restartReason: the database connection is opened at boot
+      logging:
+        type: boolean
+        default: false
+        title: SQL query logging
+        description: Log SQL queries at debug level
+        order: 8
+        requiresRestart: true
+        restartReason: the database connection is opened at boot
+      pool:
+        type: object
+        subsection: connectionPool
+        title: Connection Pool
+        properties:
+          max:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 5
+            title: Maximum connections
+            order: 1
+            requiresRestart: true
+            restartReason: the connection pool is created at boot
+          min:
+            type: integer
+            minimum: 0
+            maximum: 20
+            default: 0
+            title: Minimum connections
+            order: 2
+            requiresRestart: true
+            restartReason: the connection pool is created at boot
+          acquire:
+            type: integer
+            minimum: 1000
+            maximum: 300000
+            default: 30000
+            title: Acquire timeout (ms)
+            order: 3
+            requiresRestart: true
+            restartReason: the connection pool is created at boot
+          idle:
+            type: integer
+            minimum: 1000
+            maximum: 300000
+            default: 10000
+            title: Idle timeout (ms)
+            order: 4
+            requiresRestart: true
+            restartReason: the connection pool is created at boot
+    required:
+      - dialect

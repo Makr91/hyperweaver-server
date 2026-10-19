@@ -9,35 +9,21 @@ import DailyRotateFile from 'winston-daily-rotate-file';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { loadConfig } from './config.js';
+import { loadConfig } from './config-loader.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const config = loadConfig();
-export const loggingConfig = config.logging || {
-  level: { value: 'info' },
-  console_enabled: { value: true },
-  log_directory: { value: '/var/log/hyperweaver-server' },
-  file_rotation: {
-    max_size: { value: 50 },
-    max_files: { value: 5 },
-  },
-  performance_threshold_ms: { value: 1000 },
-  categories: {},
-};
+export const loggingConfig = loadConfig('app').logging;
 
 /**
- * Extract a value from metadata format
+ * Answer a configuration value as it is.
+ * @param {*} configItem - The value
+ * @returns {*} The value
  */
-export const getValue = configItem => {
-  if (typeof configItem === 'object' && configItem !== null && 'value' in configItem) {
-    return configItem.value;
-  }
-  return configItem;
-};
+export const getValue = configItem => configItem;
 
-const logDir = getValue(loggingConfig.log_directory) || '/var/log/hyperweaver-server';
+const logDir = loggingConfig.log_directory;
 const currentDir = path.join(logDir, 'current');
 const archivesDir = path.join(logDir, 'archives');
 const metaDir = path.join(logDir, '.meta');

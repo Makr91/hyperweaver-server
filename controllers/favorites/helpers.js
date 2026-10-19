@@ -14,7 +14,7 @@ const getAuthServerUrl = req => {
   }
 
   const config = loadConfig();
-  const issuer = config.authentication?.oidc_providers?.value?.[providerName]?.issuer?.value;
+  const issuer = config.authentication?.oidc_providers?.[providerName]?.issuer;
   if (!issuer) {
     throw new Error(`OIDC provider '${providerName}' not found in configuration`);
   }

@@ -1,6 +1,8 @@
 import db from '../../models/index.js';
 import jwt from 'jsonwebtoken';
-import { config } from '../../index.js';
+import { loadConfig } from '../../utils/config.js';
+
+const config = loadConfig();
 import { log } from '../../utils/Logger.js';
 
 const { user: UserModel } = db;
@@ -81,7 +83,7 @@ export const verifyToken = async (req, res) => {
       });
     }
 
-    const decoded = jwt.verify(token, config.authentication.jwt_secret.value);
+    const decoded = jwt.verify(token, config.authentication.jwt_secret);
 
     const user = await UserModel.findByPk(decoded.userId);
 
@@ -106,7 +108,7 @@ export const verifyToken = async (req, res) => {
     return res.json({
       success: true,
       valid: true,
-      datacenter_label: config.branding?.datacenter_label?.value || 'Hyperweaver',
+      datacenter_label: config.branding?.datacenter_label || 'Hyperweaver',
       user: {
         id: user.id,
         username: user.username,
@@ -201,7 +203,7 @@ export const getAuthMethods = (req, res) => {
     void req;
     const methods = [];
 
-    if (config.authentication?.local_enabled?.value !== false) {
+    if (config.authentication?.local_enabled !== false) {
       methods.push({
         id: 'local',
         name: 'Local Account',
@@ -209,10 +211,10 @@ export const getAuthMethods = (req, res) => {
       });
     }
 
-    if (config.authentication?.ldap_enabled?.value === true) {
+    if (config.authentication?.ldap_enabled === true) {
       let ldapDisplayName = 'LDAP Directory';
       try {
-        const ldapUrl = config.authentication.ldap_url?.value;
+        const ldapUrl = config.authentication.ldap_url;
         if (ldapUrl) {
           const urlMatch = ldapUrl.match(/^ldaps?:\/\/(?<host>[^:/]+)/i);
           if (urlMatch) {
@@ -238,13 +240,13 @@ export const getAuthMethods = (req, res) => {
     }
 
     try {
-      const oidcProvidersConfig = config.authentication?.oidc_providers?.value || {};
+      const oidcProvidersConfig = config.authentication?.oidc_providers || {};
 
       Object.entries(oidcProvidersConfig).forEach(([providerName, providerConfig]) => {
-        if (providerConfig.enabled?.value && providerConfig.display_name?.value) {
+        if (providerConfig.enabled && providerConfig.display_name) {
           methods.push({
             id: `oidc-${providerName}`,
-            name: providerConfig.display_name.value,
+            name: providerConfig.display_name,
             enabled: true,
           });
         }
@@ -258,8 +260,7 @@ export const getAuthMethods = (req, res) => {
     res.json({
       success: true,
       methods,
-      local_registration_enabled:
-        config.authentication?.local_registration_enabled?.value !== false,
+      local_registration_enabled: config.authentication?.local_registration_enabled !== false,
     });
   } catch (error) {
     log.auth.error('Get auth methods error', { error: error.message });

@@ -36,7 +36,7 @@ const buildRpLogoutUrl = sessionOidc => {
   }
   url.searchParams.set(
     'post_logout_redirect_uri',
-    `${config.frontend.frontend_url.value}/ui/login?logout=success`
+    `${config.frontend.frontend_url}/ui/login?logout=success`
   );
   return url.toString();
 };
@@ -61,10 +61,10 @@ const revokeOidcGrant = async sessionOidc => {
   }
 
   const config = loadConfig();
-  const providerConfig = config.authentication?.oidc_providers?.value?.[providerName];
-  const clientId = providerConfig?.client_id?.value;
-  const clientSecret = providerConfig?.client_secret?.value;
-  const authMethod = providerConfig?.token_endpoint_auth_method?.value || 'client_secret_basic';
+  const providerConfig = config.authentication?.oidc_providers?.[providerName];
+  const clientId = providerConfig?.client_id;
+  const clientSecret = providerConfig?.client_secret;
+  const authMethod = providerConfig?.token_endpoint_auth_method || 'client_secret_basic';
 
   try {
     // Revoke the refresh token — at most providers this revokes the whole grant.
@@ -117,9 +117,9 @@ const verifyLogoutToken = async logoutToken => {
   // Select our provider by matching aud against the configured client_ids (each provider's
   // client_id is distinct — this identifies which of our OIDC clients the token is for).
   const config = loadConfig();
-  const providers = config.authentication?.oidc_providers?.value || {};
+  const providers = config.authentication?.oidc_providers || {};
   const entry = Object.entries(providers).find(([, providerConfig]) =>
-    audiences.includes(providerConfig.client_id?.value)
+    audiences.includes(providerConfig.client_id)
   );
   if (!entry) {
     throw new Error('logout_token audience does not match any configured OIDC client');
@@ -135,7 +135,7 @@ const verifyLogoutToken = async logoutToken => {
   // Issuer is REQUIRED (spec §2.4) and its origin must match the configured provider
   // (tolerates the dynamic per-hostname issuer at the origin level; the signature below is
   // the authoritative proof of origin).
-  const configuredIssuer = providerConfig.issuer?.value;
+  const configuredIssuer = providerConfig.issuer;
   if (!iss || !configuredIssuer || new URL(iss).origin !== new URL(configuredIssuer).origin) {
     throw new Error('logout_token issuer does not match the provider');
   }
@@ -149,7 +149,7 @@ const verifyLogoutToken = async logoutToken => {
   const publicKey = crypto.createPublicKey({ key: jwk, format: 'jwk' });
   const claims = jwt.verify(logoutToken, publicKey, {
     algorithms: ['RS256'],
-    audience: providerConfig.client_id.value,
+    audience: providerConfig.client_id,
   });
 
   // Back-channel-specific validation (spec §2.4).

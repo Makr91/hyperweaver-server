@@ -34,7 +34,7 @@ import { extractOidcAccessToken } from './favorites/helpers.js';
 export const proxyToBoxVault = async (req, res) => {
   try {
     const config = loadConfig();
-    const baseUrl = config.integrations?.boxvault?.url?.value;
+    const baseUrl = config.integrations?.boxvault?.url;
     if (!baseUrl) {
       return res.status(503).json({
         success: false,
@@ -64,7 +64,7 @@ export const proxyToBoxVault = async (req, res) => {
         'Content-Type': req.headers['content-type'] || 'application/json',
         'User-Agent': 'Hyperweaver-Server/1.0',
       },
-      timeout: config.limits?.api_timeouts?.default_request?.value || 60000,
+      timeout: config.limits?.api_timeouts?.default_request || 60000,
       validateStatus: () => true,
     };
     if (req.method !== 'GET' && req.body && Object.keys(req.body).length > 0) {
