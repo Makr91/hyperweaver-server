@@ -11,13 +11,13 @@ const ADD_FAILURES = { 409: 'conflict', 502: 'bad-gateway' };
 
 /**
  * The visible rows with each agent's `api_key` added, for a global admin who
- * asks with `includeApiKeys=true`; the rows unchanged for anyone else.
+ * asks with `include_api_keys=true`; the rows unchanged for anyone else.
  * @param {import('express').Request} req - The request
  * @param {Array<Object>} rows - The visible registry rows as plain objects
  * @returns {Promise<Array<Object>>} The rows
  */
 const withApiKeys = async (req, rows) => {
-  if (req.query.includeApiKeys !== 'true' || !(await getUserOrgAccess(req)).bypass) {
+  if (req.query.include_api_keys !== 'true' || !(await getUserOrgAccess(req)).bypass) {
     return rows;
   }
   const keyed = await ServerModel.scope('withApiKey').findAll({
@@ -43,7 +43,7 @@ const withApiKeys = async (req, rows) => {
  *         application/json:
  *           schema:
  *             type: object
- *             required: [hostname, port, protocol, entityName]
+ *             required: [hostname, port, protocol, entity_name]
  *             properties:
  *               hostname:
  *                 type: string
@@ -58,7 +58,7 @@ const withApiKeys = async (req, rows) => {
  *                 enum: [http, https]
  *                 description: Connection protocol
  *                 example: "https"
- *               entityName:
+ *               entity_name:
  *                 type: string
  *                 description: Display name for the agent
  *                 example: "Production Agent"
@@ -66,11 +66,11 @@ const withApiKeys = async (req, rows) => {
  *                 type: string
  *                 description: Optional server description
  *                 example: "Main production server for machine management"
- *               apiKey:
+ *               api_key:
  *                 type: string
  *                 description: Existing agent API key (optional - will bootstrap if not provided)
  *                 example: "hw_abc123def456.s3cr3t..."
- *               allowInsecure:
+ *               allow_insecure:
  *                 type: boolean
  *                 description: Accept self-signed TLS certificates from this agent
  *                 example: false
@@ -129,7 +129,15 @@ const withApiKeys = async (req, rows) => {
  */
 export const addServer = async (req, res) => {
   try {
-    const { hostname, port, protocol, entityName, description, apiKey, allowInsecure } = req.body;
+    const {
+      hostname,
+      port,
+      protocol,
+      entity_name: entityName,
+      description,
+      api_key: apiKey,
+      allow_insecure: allowInsecure,
+    } = req.body;
 
     if (!hostname || !port || !protocol || !entityName) {
       return res.status(400).json({
@@ -181,13 +189,13 @@ export const addServer = async (req, res) => {
  * /api/servers:
  *   get:
  *     summary: Get all registered agents
- *     description: Retrieve list of all registered host agents. With includeApiKeys=true a global admin's rows carry each agent's api_key.
+ *     description: Retrieve list of all registered host agents. With include_api_keys=true a global admin's rows carry each agent's api_key.
  *     tags: [Server Management]
  *     security:
  *       - JwtAuth: []
  *     parameters:
  *       - in: query
- *         name: includeApiKeys
+ *         name: include_api_keys
  *         required: false
  *         schema:
  *           type: boolean
@@ -268,7 +276,7 @@ export const getAllServers = async (req, res) => {
  *                 enum: [http, https]
  *                 description: Connection protocol
  *                 example: "https"
- *               allowInsecure:
+ *               allow_insecure:
  *                 type: boolean
  *                 description: Accept self-signed TLS certificates for this test
  *                 example: false
@@ -313,7 +321,7 @@ export const getAllServers = async (req, res) => {
  */
 export const testServer = async (req, res) => {
   try {
-    const { hostname, port, protocol, allowInsecure } = req.body;
+    const { hostname, port, protocol, allow_insecure: allowInsecure } = req.body;
 
     if (!hostname || !port || !protocol) {
       return res.status(400).json({

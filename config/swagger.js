@@ -317,7 +317,7 @@ const options = {
             api_key: {
               type: 'string',
               description:
-                "The agent's API key, on the list answer of a global admin who asks with includeApiKeys=true",
+                "The agent's API key, on the list answer of a global admin who asks with include_api_keys=true",
             },
             created_at: {
               type: 'string',

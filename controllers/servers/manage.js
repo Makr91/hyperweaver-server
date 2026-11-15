@@ -126,9 +126,9 @@ export const removeServer = async (req, res) => {
  *         application/json:
  *           schema:
  *             type: object
- *             required: [allowInsecure]
+ *             required: [allow_insecure]
  *             properties:
- *               allowInsecure:
+ *               allow_insecure:
  *                 type: boolean
  *                 description: Accept self-signed TLS certificates from this agent
  *                 example: true
@@ -149,7 +149,7 @@ export const removeServer = async (req, res) => {
  *                 server:
  *                   $ref: '#/components/schemas/Server'
  *       400:
- *         description: allowInsecure (boolean) is required
+ *         description: allow_insecure (boolean) is required
  *         content:
  *           application/json:
  *             schema:
@@ -182,12 +182,12 @@ export const removeServer = async (req, res) => {
 export const updateServer = async (req, res) => {
   try {
     const { serverId } = req.params;
-    const { allowInsecure } = req.body;
+    const { allow_insecure: allowInsecure } = req.body;
 
     if (typeof allowInsecure !== 'boolean') {
       return res.status(400).json({
         success: false,
-        message: 'allowInsecure (boolean) is required',
+        message: 'allow_insecure (boolean) is required',
       });
     }
 

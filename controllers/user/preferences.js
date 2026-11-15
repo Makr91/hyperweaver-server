@@ -89,14 +89,16 @@ const isKnownTimezone = value => {
 };
 
 /**
- * Validate the incoming patch. Absent keys mean "unchanged", null or empty
- * string mean "clear" — the identity provider's semantics, mirrored here so
- * both paths behave identically.
+ * The failing rules of language, mode, motion and timezone: an absent or
+ * clearing value passes; a language outside the tag shape or over ten
+ * characters is refused pattern at /language, a mode or motion outside its
+ * list enum, a timezone the runtime does not know pattern at /timezone.
  * @param {Object} body - Request body
- * @returns {string|null} Invalid field name, or null when acceptable
+ * @returns {Array<{pointer: string, rule: string, params: Object}>} The failing rules
  */
-const findInvalidField = body => {
+const fieldErrors = body => {
   const { language, mode, motion, timezone } = body;
+  const failures = [];
 
   if (typeof language !== 'undefined' && !isClearing(language)) {
     if (
@@ -104,21 +106,21 @@ const findInvalidField = body => {
       language.length > MAX_LANGUAGE_LENGTH ||
       !LANGUAGE_PATTERN.test(language)
     ) {
-      return 'language';
+      failures.push({ pointer: '/language', rule: 'pattern', params: { pattern: 'languageTag' } });
     }
   }
   if (typeof mode !== 'undefined' && !isClearing(mode) && !MODES.includes(mode)) {
-    return 'mode';
+    failures.push({ pointer: '/mode', rule: 'enum', params: { enum: MODES.join(', ') } });
   }
   if (typeof motion !== 'undefined' && !isClearing(motion) && !MOTIONS.includes(motion)) {
-    return 'motion';
+    failures.push({ pointer: '/motion', rule: 'enum', params: { enum: MOTIONS.join(', ') } });
   }
   if (typeof timezone !== 'undefined' && !isClearing(timezone)) {
     if (typeof timezone !== 'string' || !isKnownTimezone(timezone)) {
-      return 'timezone';
+      failures.push({ pointer: '/timezone', rule: 'pattern', params: { pattern: 'timezone' } });
     }
   }
-  return null;
+  return failures;
 };
 
 /**
@@ -287,13 +289,13 @@ const delegateToProvider = async (req, body) => {
  *                   type: string
  *                   nullable: true
  *       422:
- *         description: The theme is not a bare name, or not one this hostname offers, or default_domain breaks the domainName pattern of /api/rules
+ *         description: A member breaks its rule, each failure a pointer among language, mode, motion, timezone, theme and default_domain
  *         content:
  *           application/problem+json:
  *             schema:
  *               $ref: '#/components/schemas/Problem'
  *       400:
- *         description: A supplied value failed validation, or the identity provider refused it
+ *         description: The identity provider refused the write, or the session is not the provider's
  *         content:
  *           application/problem+json:
  *             schema:
@@ -319,12 +321,9 @@ const delegateToProvider = async (req, body) => {
  */
 export const updatePreferences = async (req, res) => {
   const body = req.body || {};
-  const invalidField = findInvalidField(body);
-
-  if (invalidField) {
-    return badRequest(req, res, req.__('users.preferenceInvalid', { invalidField }));
-  }
-  const failures = [themeError(body, req.hostname), domainError(body)].filter(Boolean);
+  const failures = [...fieldErrors(body), themeError(body, req.hostname), domainError(body)].filter(
+    Boolean
+  );
   if (failures.length > 0) {
     return refuse(res, req, failures);
   }

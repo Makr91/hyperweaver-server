@@ -280,7 +280,6 @@
     "roles": {
       "error": "Ocurrió un error al actualizar los roles del usuario."
     },
-    "preferenceInvalid": "El valor proporcionado para {{invalidField}} no es válido.",
     "preferencesRequireIdpSession": "Inicia sesión con tu proveedor de identidad para cambiar estas preferencias.",
     "preferencesDelegationFailed": "No se pudo contactar con tu proveedor de identidad. Inténtalo de nuevo.",
     "nameInvalid": "El nombre visible debe ser texto.",
