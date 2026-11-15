@@ -1,0 +1,240 @@
+// update.js
+import { log } from '../../utils/Logger.js';
+import { conflict, problem } from '../../utils/problem.js';
+import db from '../../models/index.js';
+import { generateEmailHash } from '../../utils/identity.js';
+import { isReservedSegment } from '../../utils/reservedSegments.js';
+import { notifyProfilesUpdated } from '../../utils/events.js';
+const { organization: Organization, sequelize, UserOrg } = db;
+
+/**
+ * @swagger
+ * /api/organization/{organizationName}:
+ *   put:
+ *     summary: Update an organization
+ *     description: Update organization information including name, description, email, and organization code
+ *     tags: [Organizations]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: organizationName
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Current organization name
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               organization:
+ *                 type: string
+ *                 description: New organization name (the slug pattern of /api/rules, unique)
+ *               description:
+ *                 type: string
+ *                 description: Organization description
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 description: Organization email
+ *               org_code:
+ *                 type: string
+ *                 pattern: '^[0-9A-F]{6}$'
+ *                 description: Organization code (the orgCode pattern of /api/rules, unique)
+ *               base_domain:
+ *                 type: string
+ *                 nullable: true
+ *                 description: The domain a bare machine name takes on a create for a member of this organization (the domainName pattern of /api/rules); null clears it
+ *     responses:
+ *       200:
+ *         description: Organization updated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Organization updated successfully."
+ *                 organization:
+ *                   $ref: '#/components/schemas/Organization'
+ *       403:
+ *         description: The organization is managed by the identity provider and may not be renamed or have its profile changed here; its name follows the identity provider's rename
+ *         content:
+ *           application/problem+json:
+ *             schema:
+ *               $ref: '#/components/schemas/Problem'
+ *       404:
+ *         description: Organization not found
+ *         content:
+ *           application/problem+json:
+ *             schema:
+ *               $ref: '#/components/schemas/Problem'
+ *       409:
+ *         description: The new name or organization code is already taken, or the new name is a reserved path segment
+ *         content:
+ *           application/problem+json:
+ *             schema:
+ *               $ref: '#/components/schemas/Problem'
+ *       422:
+ *         description: A value breaks a rule of the organization form
+ *         content:
+ *           application/problem+json:
+ *             schema:
+ *               $ref: '#/components/schemas/Problem'
+ *       500:
+ *         description: Internal server error
+ *         content:
+ *           application/problem+json:
+ *             schema:
+ *               $ref: '#/components/schemas/Problem'
+ */
+const trimIfSet = value => (value ? value.trim() : value);
+
+/**
+ * Rejections for externally-managed orgs (mirrored from an OIDC provider):
+ * the name is renamed by the identity provider alone, the mirror following its
+ * rename at the next sync, and the profile is IdP-truth (synced through the
+ * SCIM Group extension), so
+ * email, description, and org_code may not be CHANGED locally (unchanged
+ * echoes from the console form pass through).
+ * @param {Object|null} org - Organization instance
+ * @param {Object} fields - { organization, email, description, org_code }
+ * @param {Object} req - Express request (for i18n)
+ * @returns {{status: number, type: string, title: string}|null}
+ */
+const getExternalEditRejection = (org, fields, req) => {
+  if (!org?.external_issuer) {
+    return null;
+  }
+  if (fields.organization && fields.organization !== org.name) {
+    return {
+      status: 403,
+      type: 'forbidden',
+      title: req.__('organizations.externallyManagedRename'),
+    };
+  }
+  const profileChanged =
+    (fields.email !== undefined && fields.email !== org.email) ||
+    (fields.description !== undefined && fields.description !== org.description) ||
+    (fields.org_code !== undefined && fields.org_code !== org.org_code);
+  if (profileChanged) {
+    return {
+      status: 403,
+      type: 'forbidden',
+      title: req.__('organizations.externallyManagedProfile'),
+    };
+  }
+  return null;
+};
+
+/**
+ * The taken value of a rename or a code change, as a `unique` failure; a
+ * reserved path segment counts as a taken name.
+ * @param {Object} org - Organization instance
+ * @param {string|undefined} organization - Trimmed new name from the request body
+ * @param {string|undefined} orgCode - Trimmed org_code from the request body
+ * @returns {Promise<{pointer: string}|null>} The pointer of the taken value, or null
+ */
+const getTakenValue = async (org, organization, orgCode) => {
+  if (organization && organization !== org.name) {
+    if (isReservedSegment(organization)) {
+      return { pointer: '/organization' };
+    }
+    const existingOrg = await Organization.findOne({ where: { name: organization } });
+    if (existingOrg) {
+      return { pointer: '/organization' };
+    }
+  }
+  if (orgCode && orgCode !== org.org_code) {
+    const existingOrg = await Organization.findOne({ where: { org_code: orgCode } });
+    if (existingOrg) {
+      return { pointer: '/org_code' };
+    }
+  }
+  return null;
+};
+
+export const update = async (req, res) => {
+  const { organization: organizationName } = req.params;
+  const { description } = req.body;
+  const organization = trimIfSet(req.body.organization);
+  const email = trimIfSet(req.body.email);
+  const org_code = trimIfSet(req.body.org_code);
+  const base_domain = trimIfSet(req.body.base_domain);
+
+  try {
+    const org = await Organization.findOne({
+      where: { name: organizationName },
+    });
+
+    if (!org) {
+      return problem(res, req, {
+        status: 404,
+        type: 'not-found',
+        title: req.__('organizations.organizationNotFound'),
+      });
+    }
+
+    const externalRejection = getExternalEditRejection(
+      org,
+      { organization, email, description, org_code },
+      req
+    );
+    if (externalRejection) {
+      return problem(res, req, externalRejection);
+    }
+
+    const taken = await getTakenValue(org, organization, org_code);
+    if (taken) {
+      return conflict(res, req, taken.pointer, 'global');
+    }
+
+    const oldName = org.name;
+
+    const transaction = await sequelize.transaction();
+    try {
+      await org.update(
+        {
+          name: organization !== undefined ? organization : org.name,
+          description: description !== undefined ? description : org.description,
+          email: email !== undefined ? email : org.email,
+          emailHash: email ? generateEmailHash(email) : org.emailHash,
+          org_code: org_code ? org_code : org.org_code,
+          base_domain: req.body.base_domain !== undefined ? base_domain || null : org.base_domain,
+        },
+        { transaction }
+      );
+      await transaction.commit();
+    } catch (err) {
+      await transaction.rollback();
+      throw err;
+    }
+
+    // Reload to ensure persistence and get fresh data
+    await org.reload();
+
+    if (org.name !== oldName) {
+      const members = await UserOrg.findAll({
+        where: { organization_id: org.id },
+        attributes: ['user_id'],
+      });
+      notifyProfilesUpdated(members.map(member => member.user_id));
+    }
+
+    return res.status(200).send({
+      message: req.__('organizations.updated'),
+      organization: org,
+    });
+  } catch (err) {
+    log.error.error('Error updating organization:', err);
+    return problem(res, req, {
+      status: 500,
+      type: 'internal',
+      title: req.__('organizations.updateError'),
+    });
+  }
+};

@@ -4,15 +4,13 @@ import { getSupportedLocales, getDefaultLocale } from '../config/i18n.js';
 import { notifyHealth } from '../utils/events.js';
 import { log } from '../utils/Logger.js';
 
-const { sequelize, server: ServerModel } = db;
-
 const STALE_AFTER_MS = 5 * 60 * 1000;
 
 let lastHealth = null;
 
 const databaseHealth = async () => {
   try {
-    await sequelize.authenticate();
+    await db.sequelize.authenticate();
     return 'ok';
   } catch {
     return 'error';
@@ -26,7 +24,10 @@ const databaseHealth = async () => {
  * @returns {Promise<string>} ok, warning or error
  */
 const agentsHealth = async () => {
-  const servers = await ServerModel.getAllServers();
+  if (!db.server) {
+    return 'ok';
+  }
+  const servers = await db.server.getAllServers();
   if (servers.length === 0) {
     return 'ok';
   }

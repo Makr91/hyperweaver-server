@@ -19,7 +19,7 @@ const resolveAgentForWs = async id => {
   if (!serverModelReady || !ServerModel) {
     return null;
   }
-  const server = await ServerModel.withScope('withApiKey').findByPk(parseInt(id));
+  const server = await ServerModel.scope('withApiKey').findByPk(parseInt(id));
   if (server && !server.isAgentRole()) {
     log.websocket.warn('WebSocket upgrade rejected: registered backend is not an agent', { id });
     return null;

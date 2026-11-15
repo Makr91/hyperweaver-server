@@ -191,7 +191,7 @@ export const updateServer = async (req, res) => {
       });
     }
 
-    const server = await ServerModel.withScope('withInactive').findByPk(parseInt(serverId));
+    const server = await ServerModel.scope('withInactive').findByPk(parseInt(serverId));
     if (!server) {
       return res.status(404).json({
         success: false,
@@ -211,7 +211,7 @@ export const updateServer = async (req, res) => {
         hostname: server.hostname,
         port: server.port,
         protocol: server.protocol,
-        entityName: server.entity_name,
+        entity_name: server.entity_name,
         allow_insecure: server.allow_insecure,
       },
     });

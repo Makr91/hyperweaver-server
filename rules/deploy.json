@@ -1,0 +1,6 @@
+{
+  "type": "object",
+  "properties": {
+    "deploy_target": { "type": "string", "minLength": 1, "maxLength": 2048 }
+  }
+}

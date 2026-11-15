@@ -41,7 +41,7 @@ const writable = (pointer, value, name, document, configDir) => {
   if (typeof value !== 'string' || value.trim() === '') {
     return [];
   }
-  if (name === 'db' && pointer === '/database/storage') {
+  if (name === 'db' && pointer === '/sql/storage') {
     return isWritable(dirname(resolve(value)))
       ? []
       : failure(pointer, 'writable', { user: SERVICE_USER });
@@ -83,13 +83,13 @@ const connects = (host, port) =>
   });
 
 const reachable = async (pointer, value, name, document) => {
-  if (name !== 'mail' || pointer !== '/mail/smtp_host' || typeof value !== 'string') {
+  if (name !== 'mail' || pointer !== '/smtp_connect/host' || typeof value !== 'string') {
     return [];
   }
   if (value.trim() === '') {
     return [];
   }
-  const port = document.mail?.smtp_port;
+  const port = document.smtp_connect?.port;
   if (!Number.isInteger(port) || (await connects(value, port))) {
     return [];
   }

@@ -5,7 +5,7 @@
  * @description Writes ./openapi.json (plain JSON, no Jekyll front matter) so CI can
  * publish it as a release asset. The hyperweaver-docs site fetches it live from
  * releases/latest/download/openapi.json to render its Swagger UI; the server's own
- * runtime /api-docs builds the spec from config/swagger.js directly. The spec's
+ * runtime /api/docs builds the spec from config/swagger.js directly. The spec's
  * `servers:` block (the Swagger server selector) is carried through verbatim.
  */
 

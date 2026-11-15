@@ -1,0 +1,13 @@
+{
+  "type": "object",
+  "required": ["access_mode"],
+  "properties": {
+    "access_mode": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "\\S",
+      "enum": ["private", "invite", "request"]
+    },
+    "default_role": { "type": "string", "enum": ["member", "admin", "guest"] }
+  }
+}

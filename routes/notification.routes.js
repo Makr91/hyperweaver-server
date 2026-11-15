@@ -1,6 +1,5 @@
 import { Router } from 'express';
-import { authenticate } from '../auth/auth.js';
-import { oidcTokenRefresh } from '../auth/oidcTokenRefresh.js';
+import { authJwt, oidcTokenRefresh } from '../middleware/index.js';
 import { apiLimiter } from '../middleware/rateLimiter.js';
 import {
   pushNotOffered,
@@ -20,17 +19,18 @@ router.use((req, res, next) => {
   next();
 });
 
-const notificationAuth = [authenticate, oidcTokenRefresh];
+const notificationAuth = [oidcTokenRefresh, authJwt.verifyToken, authJwt.isUser];
+const subscriptionAuth = [authJwt.verifyToken, authJwt.isUser];
 
 router.get('/notifications/vapid-key', apiLimiter, pushNotOffered);
 
-router.post('/notifications/subscriptions', apiLimiter, authenticate, pushNotOffered);
+router.post('/notifications/subscriptions', apiLimiter, subscriptionAuth, pushNotOffered);
 
-router.delete('/notifications/subscriptions', apiLimiter, authenticate, pushNotOffered);
+router.delete('/notifications/subscriptions', apiLimiter, subscriptionAuth, pushNotOffered);
 
-router.post('/notifications/test/toast', apiLimiter, authenticate, pushNotOffered);
+router.post('/notifications/test/toast', apiLimiter, subscriptionAuth, pushNotOffered);
 
-router.post('/notifications/test/channel', apiLimiter, authenticate, pushNotOffered);
+router.post('/notifications/test/channel', apiLimiter, subscriptionAuth, pushNotOffered);
 
 router.get('/notifications', apiLimiter, notificationAuth, listNotifications);
 

@@ -33,7 +33,7 @@ Please describe what you've already attempted:
 
 - [ ] Checked the [documentation](https://hyperweaver.startcloud.com/)
 - [ ] Searched existing issues and discussions
-- [ ] Tried the interactive API documentation (`/api-docs` on your server)
+- [ ] Tried the interactive API documentation (`/api/docs` on your server)
 
 **Specific attempts:**
 

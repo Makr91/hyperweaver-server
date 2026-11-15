@@ -1,73 +1,134 @@
 /**
  * @fileoverview Multi-tenancy org-access layer (D11/D15: the org layer lives ONLY in the
- * Server; agents stay org-blind). Membership comes live from the OIDC organizations
- * claim for federated logins, or from the local organizations table for local logins —
- * one enforcement mechanism, two membership sources.
+ * Server; agents stay org-blind). Membership is read from the user_organizations rows,
+ * which a federated sign-in and the SCIM push keep in step with the identity provider.
  *
  * Access model (D15):
  * - An agent is owned by one or more orgs (server_orgs). Owning-org users see the whole
  *   agent, including machines with no org assignment.
  * - A machine may belong to org(s) (machine_orgs). Users whose orgs own only machines on
  *   an agent see the agent with ONLY those machines.
- * - An agent with NO org rows behaves as before multi-tenancy: open to every
- *   authenticated user of this Server.
+ * - An agent with NO org rows is reached by a global admin alone; a machine's own
+ *   orgs still reach that machine.
  * - Roles: OWNER/ADMIN = manage everything in scope (host too when the org owns the
- *   agent); MEMBER = view, consoles, and power actions only. Local users map:
- *   super-admin = bypass, admin = ADMIN of their org, user = MEMBER of their org.
+ *   agent); MEMBER = view, consoles, and power actions only. A global admin and a live
+ *   superadmin service account bypass; GUEST = view only, never the machine document.
  * - Machine names are immutable on the Agent API (no machine-rename wire exists), so
  *   name-keyed org stickers cannot orphan.
  */
 
 import db from '../models/index.js';
 import { log } from './Logger.js';
+import { problem } from './problem.js';
+import { agentSubPath } from './agentPath.js';
+import {
+  holdsGlobalAdmin,
+  serviceAccountIsSuperadmin,
+  serviceAccountMembership,
+} from './orgMembership.js';
 
-const { user: UserModel, serverOrg: ServerOrgModel, machineOrg: MachineOrgModel } = db;
+const {
+  user: UserModel,
+  organization: OrganizationModel,
+  service_account: ServiceAccountModel,
+  UserOrg,
+  serverOrg: ServerOrgModel,
+  machineOrg: MachineOrgModel,
+} = db;
 
-const ROLE_RANK = { OWNER: 3, ADMIN: 2, MEMBER: 1 };
+const ROLE_RANK = { OWNER: 4, ADMIN: 3, MEMBER: 2, GUEST: 1 };
+const ROLE_OF = { owner: 'OWNER', admin: 'ADMIN', member: 'MEMBER', guest: 'GUEST' };
 
 const bestRole = (a, b) => ((ROLE_RANK[a] || 0) >= (ROLE_RANK[b] || 0) ? a : b);
 
 export const isManagerRole = role => role === 'OWNER' || role === 'ADMIN';
 
-/**
- * Resolve the requesting user's org membership as a Map of org_uuid → role, plus a
- * bypass flag for local super-admins.
- * @param {import('express').Request} req
- * @returns {Promise<{bypass: boolean, orgs: Map<string, string>, primaryOrg: string|null}>}
- */
-export const getUserOrgAccess = async req => {
+const serviceAccountAccess = async serviceAccountId => {
   const orgs = new Map();
-  let primaryOrg = null;
-
-  if (req.user?.role === 'super-admin') {
-    return { bypass: true, orgs, primaryOrg };
+  if (await serviceAccountIsSuperadmin(serviceAccountId)) {
+    return { bypass: true, orgs, primaryOrg: null, privileged: true };
   }
+  const account = await ServiceAccountModel.findByPk(serviceAccountId);
+  const membership = account ? await serviceAccountMembership(account) : null;
+  const organization = membership
+    ? await OrganizationModel.findByPk(membership.organization_id, { attributes: ['uuid'] })
+    : null;
+  if (!organization?.uuid) {
+    return { bypass: false, orgs, primaryOrg: null, privileged: false };
+  }
+  const role = ROLE_OF[membership.role] || 'MEMBER';
+  orgs.set(organization.uuid, role);
+  return { bypass: false, orgs, primaryOrg: organization.uuid, privileged: isManagerRole(role) };
+};
 
-  const oidc = req.session?.oidc;
-  if (oidc && oidc.userId === req.user?.userId && Array.isArray(oidc.organizations)) {
-    for (const org of oidc.organizations) {
-      if (!org?.uuid) {
-        continue;
-      }
-      const roles = Array.isArray(org.roles) ? org.roles : [];
-      const role = roles.reduce((acc, r) => bestRole(acc, r), 'MEMBER');
-      orgs.set(org.uuid, role);
-      if (org.primary) {
-        primaryOrg = org.uuid;
+const accessOfUser = async userId => {
+  const orgs = new Map();
+  const user = await UserModel.findByPk(userId);
+  if (!user) {
+    return { bypass: false, orgs, primaryOrg: null, privileged: false };
+  }
+  if (await holdsGlobalAdmin(user)) {
+    return { bypass: true, orgs, primaryOrg: null, privileged: true };
+  }
+  let primaryOrg = null;
+  const memberships = await UserOrg.getUserOrganizations(user.id);
+  for (const membership of memberships) {
+    const { uuid, id } = membership.organization;
+    if (uuid) {
+      orgs.set(uuid, ROLE_OF[membership.role] || 'MEMBER');
+      if (id === user.primary_organization_id) {
+        primaryOrg = uuid;
       }
     }
-    return { bypass: false, orgs, primaryOrg };
   }
+  return {
+    bypass: false,
+    orgs,
+    primaryOrg,
+    privileged: [...orgs.values()].some(isManagerRole),
+  };
+};
 
-  const user = await UserModel.findByPk(req.user?.userId, {
-    include: [{ association: 'organization', attributes: ['id', 'org_uuid'] }],
-  });
-  if (user?.organization?.org_uuid) {
-    const role = req.user?.role === 'admin' ? 'ADMIN' : 'MEMBER';
-    orgs.set(user.organization.org_uuid, role);
-    primaryOrg = user.organization.org_uuid;
+/**
+ * Resolve the caller's org membership as a Map of organization uuid to role,
+ * a bypass flag for a global admin or a live superadmin service account, and
+ * `privileged` for a caller who is either of those or an owner or admin of
+ * any organization. Resolved once per request.
+ * @param {import('express').Request} req - The request, `req.userId` set by the token gate
+ * @returns {Promise<{bypass: boolean, orgs: Map<string, string>, primaryOrg: string|null, privileged: boolean}>}
+ */
+export const getUserOrgAccess = req => {
+  if (!req.userOrgAccess) {
+    req.userOrgAccess =
+      req.isServiceAccount && req.serviceAccountId
+        ? serviceAccountAccess(req.serviceAccountId)
+        : accessOfUser(req.userId);
   }
-  return { bypass: false, orgs, primaryOrg };
+  return req.userOrgAccess;
+};
+
+/**
+ * Admit a global admin, or an owner or admin of any organization.
+ * @param {import('express').Request} req - The request
+ * @param {import('express').Response} res - The response
+ * @param {import('express').NextFunction} next - The next handler
+ * @returns {Promise<void>}
+ */
+export const requireOrgManager = async (req, res, next) => {
+  try {
+    const access = await getUserOrgAccess(req);
+    if (access.privileged) {
+      return next();
+    }
+    return problem(res, req, {
+      status: 403,
+      type: 'forbidden',
+      title: req.__('organizations.requireAdminOrOwner'),
+    });
+  } catch (error) {
+    log.auth.error('Org manager check failed', { error: error.message });
+    return problem(res, req, { status: 500, type: 'internal' });
+  }
 };
 
 /**
@@ -85,17 +146,6 @@ export const resolveAgentAccess = async (req, serverId) => {
   }
 
   const agentOrgRows = await ServerOrgModel.findOrgsForServer(serverId);
-
-  if (agentOrgRows.length === 0) {
-    return {
-      level: 'full',
-      role: 'ADMIN',
-      machines: null,
-      stampOrgs: [...userAccess.orgs.keys()],
-      userOrgs: userAccess.orgs,
-      primaryOrg: userAccess.primaryOrg,
-    };
-  }
 
   let agentRole = null;
   for (const row of agentOrgRows) {
@@ -194,6 +244,27 @@ const memberMethodAllowed = (method, subPath) => {
   );
 };
 
+const READ_METHODS = ['GET', 'HEAD', 'OPTIONS'];
+
+/**
+ * Whether a role may send a method to an agent sub-path: an owner or admin
+ * anything, a guest the reads a member may make, a member what
+ * memberMethodAllowed admits.
+ * @param {string} role - OWNER, ADMIN, MEMBER or GUEST
+ * @param {string} method - The request method
+ * @param {string} subPath - The agent sub-path
+ * @returns {boolean}
+ */
+const roleMethodAllowed = (role, method, subPath) => {
+  if (isManagerRole(role)) {
+    return true;
+  }
+  if (role === 'GUEST' && !READ_METHODS.includes(method)) {
+    return false;
+  }
+  return memberMethodAllowed(method, subPath);
+};
+
 const machinePathName = subPath => {
   const match = subPath.match(/^machines\/(?<name>[^/]+)(?:\/|$)/);
   return match ? decodeURIComponent(match.groups.name) : null;
@@ -253,7 +324,7 @@ const authorizeVmMachinePath = (req, res, access, subPath, machineName) => {
     deny(res, 'No access to this machine');
     return false;
   }
-  if (role === 'MEMBER' && !memberMethodAllowed(req.method, subPath)) {
+  if (!roleMethodAllowed(role, req.method, subPath)) {
     deny(res, ROLE_DENIED);
     return false;
   }
@@ -303,7 +374,7 @@ const authorizeVmAgentSurface = (req, access, subPath) => {
  * request may proceed.
  */
 const authorizeVmLookupPath = async (req, res, access, subPath, serverId, lookupRule) => {
-  const server = await db.server.withScope('withApiKey').findByPk(serverId);
+  const server = await db.server.scope('withApiKey').findByPk(serverId);
   if (!server) {
     res.status(404).json({ success: false, message: 'Agent not found' });
     return false;
@@ -318,7 +389,7 @@ const authorizeVmLookupPath = async (req, res, access, subPath, serverId, lookup
     deny(res, ROLE_DENIED);
     return false;
   }
-  if (role === 'MEMBER' && !memberMethodAllowed(req.method, subPath)) {
+  if (!roleMethodAllowed(role, req.method, subPath)) {
     deny(res, ROLE_DENIED);
     return false;
   }
@@ -332,9 +403,7 @@ const authorizeVmLookupPath = async (req, res, access, subPath, serverId, lookup
 export const orgAuthorizeAgent = async (req, res, next) => {
   try {
     const serverId = parseInt(req.params.id);
-    const subPath = Array.isArray(req.params.splat)
-      ? req.params.splat.join('/')
-      : req.params.splat || '';
+    const subPath = agentSubPath(req);
 
     const access = await resolveAgentAccess(req, serverId);
     req.orgAccess = access;
@@ -344,11 +413,11 @@ export const orgAuthorizeAgent = async (req, res, next) => {
     }
 
     if (access.level === 'full') {
-      if (access.role === 'MEMBER') {
+      if (!isManagerRole(access.role)) {
         if (subPath === 'ws-ticket' && req.method === 'GET' && !req.query?.machine) {
           return deny(res, 'Members must request a machine-scoped ticket (?machine=)');
         }
-        if (!memberMethodAllowed(req.method, subPath)) {
+        if (!roleMethodAllowed(access.role, req.method, subPath)) {
           return deny(res, ROLE_DENIED);
         }
       }

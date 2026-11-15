@@ -1,53 +1,51 @@
-import { DataTypes } from '@sequelize/core';
-
 /**
  * Credential Model
  * Stores external authentication provider credentials linked to users
  */
-export default function (sequelize) {
+export default (sequelize, Sequelize) => {
   const Credential = sequelize.define(
     'Credential',
     {
       id: {
-        type: DataTypes.INTEGER,
+        type: Sequelize.INTEGER,
         primaryKey: true,
         autoIncrement: true,
+        comment: 'Unique credential identifier',
       },
       user_id: {
-        type: DataTypes.INTEGER,
+        type: Sequelize.INTEGER,
         allowNull: false,
         references: {
-          table: 'users',
+          model: 'users',
           key: 'id',
         },
         onUpdate: 'CASCADE',
         onDelete: 'CASCADE',
-        columnName: 'user_id',
+        comment: 'Reference to users table',
+        field: 'user_id',
       },
       provider: {
-        // Full provider identity: 'ldap' or 'oidc-<name>' where <name> is the configured
-        // oidc_providers yaml key (e.g. 'oidc-startcloud'). Per-provider subject namespaces —
-        // two IdPs issuing the same `sub` must never resolve to the same credential (that
-        // would allow cross-provider login-as and wrong-user back-channel revocation).
-        type: DataTypes.STRING(50),
+        type: Sequelize.STRING(255),
         allowNull: false,
-        validate: {
-          notEmpty: true,
-        },
+        comment:
+          'Credential namespace: the OIDC issuer URL (iss) for OIDC credentials, or the protocol name (ldap, saml, ...) for non-issuer providers',
       },
       subject: {
-        type: DataTypes.STRING(255),
+        type: Sequelize.STRING(255),
         allowNull: false,
+        comment: 'Provider-specific user identifier (sub claim)',
       },
       external_id: {
-        type: DataTypes.STRING(255),
+        type: Sequelize.STRING(255),
         allowNull: true,
-        columnName: 'external_id',
+        comment: 'Additional provider user ID if different from subject',
+        field: 'external_id',
       },
       external_email: {
-        type: DataTypes.STRING(255),
+        type: Sequelize.STRING(255),
         allowNull: true,
-        columnName: 'external_email',
+        comment: 'Email from external provider',
+        field: 'external_email',
         validate: {
           isEmail: {
             msg: 'External email must be a valid email address',
@@ -55,10 +53,23 @@ export default function (sequelize) {
         },
       },
       linked_at: {
-        type: DataTypes.DATE,
+        type: Sequelize.DATE,
         allowNull: false,
-        defaultValue: DataTypes.NOW,
-        columnName: 'linked_at',
+        defaultValue: Sequelize.NOW,
+        comment: 'When this credential was linked to the user',
+        field: 'linked_at',
+      },
+      created_at: {
+        type: Sequelize.DATE,
+        allowNull: false,
+        defaultValue: Sequelize.NOW,
+        field: 'created_at',
+      },
+      updated_at: {
+        type: Sequelize.DATE,
+        allowNull: false,
+        defaultValue: Sequelize.NOW,
+        field: 'updated_at',
       },
     },
     {
@@ -86,13 +97,16 @@ export default function (sequelize) {
           name: 'idx_federated_credentials_external_email',
         },
       ],
+      comment: 'Stores external authentication provider credentials linked to users',
     }
   );
 
-  // Associations
+  /**
+   * Associations
+   */
   Credential.associate = function (models) {
     Credential.belongsTo(models.user, {
-      foreignKey: { name: 'user_id', onDelete: 'CASCADE' },
+      foreignKey: 'user_id',
       as: 'user',
     });
   };
@@ -111,6 +125,33 @@ export default function (sequelize) {
     return this.findOne({
       where: { provider, subject },
     });
+  };
+
+  /**
+   * Find an OIDC credential by issuer and subject (#30).
+   *
+   * Lazy deterministic backfill: rows created before issuer-scoping stored the
+   * flat provider value 'oidc' (single-issuer deployment). On a miss, claim any
+   * matching 'oidc' row for this issuer by rewriting its provider in place.
+   * @param {string} issuer - OIDC issuer URL (iss claim)
+   * @param {string} subject - Provider-specific user identifier
+   * @param {Object|null} transaction - Optional transaction for the lookup/backfill
+   * @returns {Promise<Credential|null>}
+   */
+  Credential.findByIssuerAndSubject = async function (issuer, subject, transaction = null) {
+    const opts = transaction ? { transaction } : {};
+    const credential = await this.findOne({ where: { provider: issuer, subject }, ...opts });
+    if (credential) {
+      return credential;
+    }
+
+    const flat = await this.findOne({ where: { provider: 'oidc', subject }, ...opts });
+    if (flat) {
+      await flat.update({ provider: issuer }, opts);
+      return flat;
+    }
+
+    return null;
   };
 
   /**
@@ -135,7 +176,8 @@ export default function (sequelize) {
       where: { external_email: email },
       include: [
         {
-          association: 'user',
+          model: sequelize.models.users,
+          as: 'user',
         },
       ],
     });
@@ -144,7 +186,7 @@ export default function (sequelize) {
   /**
    * Link external credential to user
    * @param {number} userId - User ID
-   * @param {string} provider - Authentication provider
+   * @param {string} provider - Credential namespace (issuer URL for OIDC, protocol name otherwise)
    * @param {Object} profile - External profile data
    * @returns {Promise<Credential>}
    */
@@ -192,4 +234,4 @@ export default function (sequelize) {
   };
 
   return Credential;
-}
+};

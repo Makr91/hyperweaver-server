@@ -1,4 +1,4 @@
-import { loadConfig } from '../utils/config.js';
+import { loadConfig } from '../utils/config-loader.js';
 import { log } from '../utils/Logger.js';
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
@@ -41,7 +41,7 @@ export const csrfProtection = (req, res, next) => {
     return next();
   }
 
-  const config = loadConfig();
+  const config = loadConfig('app');
   const allowed = new Set(
     [
       `${req.protocol}://${req.get('host')}`,

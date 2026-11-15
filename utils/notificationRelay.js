@@ -51,12 +51,14 @@ const sweepIdle = keptUserId => {
 };
 
 const contextOf = req => {
-  const oidc = req.session?.oidc;
-  if (!oidc || oidc.userId !== req.userId || !String(oidc.provider || '').startsWith('oidc-')) {
+  const provider = req.authProvider || req.tokenClaims?.provider;
+  if (typeof provider !== 'string' || !provider.startsWith('oidc-')) {
     return null;
   }
   const token = extractOidcAccessToken(req);
-  const expiresAt = oidc.expires_at;
+  const expiresAt = req.authProvider
+    ? req.tokenClaims.exp * 1000
+    : (req.oidcTokens || req.tokenClaims).oidc_expires_at;
   if (!token || !Number.isFinite(expiresAt)) {
     return null;
   }

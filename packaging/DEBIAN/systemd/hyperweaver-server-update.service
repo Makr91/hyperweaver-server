@@ -3,9 +3,9 @@ Description=Apply a Hyperweaver Server self-update requested from the admin page
 
 [Service]
 Type=oneshot
-ExecStartPre=/bin/rm -f /var/lib/Hyperweaver Server/update.request
-ExecStart=/usr/bin/apt-get install -y --only-upgrade Hyperweaver Server
+ExecStartPre=/bin/rm -f /var/lib/hyperweaver-server/update.request
+ExecStart=/usr/bin/apt-get install -y --only-upgrade hyperweaver-server
 Environment=DEBIAN_FRONTEND=noninteractive
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=Hyperweaver Server-update
+SyslogIdentifier=hyperweaver-server-update

@@ -211,7 +211,7 @@ const ensureAgentRelays = async () => {
     }
     return;
   }
-  const servers = await ServerModel.withScope('withApiKey').findAll();
+  const servers = await ServerModel.scope('withApiKey').findAll();
   const live = new Set(servers.map(server => server.id));
   for (const relay of relays.values()) {
     if (!live.has(relay.id)) {

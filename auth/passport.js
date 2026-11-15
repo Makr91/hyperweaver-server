@@ -1,84 +1,326 @@
-/**
- * @fileoverview Passport.js configuration for Hyperweaver Server. Config is loaded
- * directly (not via index.js) to avoid a circular dependency.
- */
-
-import passport from 'passport';
-import { Strategy as JwtStrategy, ExtractJwt } from 'passport-jwt';
+import {
+  calculatePKCECodeChallenge,
+  buildAuthorizationUrl as _buildAuthorizationUrl,
+  authorizationCodeGrant,
+  buildEndSessionUrl as _buildEndSessionUrl,
+  ClientSecretBasic,
+  ClientSecretPost,
+  None,
+  discovery,
+} from 'openid-client';
 import { loadConfig } from '../utils/config-loader.js';
-import db from '../models/index.js';
 import { log } from '../utils/Logger.js';
-import { setupLdapStrategy } from './ldapStrategy.js';
-import { setupOidcProviders, getOidcConfiguration } from './oidcStrategies.js';
+import db from '../models/index.js'; // This is correct
+import externalUserHandler from './external-user-handler.js';
 
 /**
- * JWT Strategy — matches the legacy custom middleware behavior exactly (no
- * issuer/audience initially, for compatibility). Rejects missing AND deactivated
- * users — a deactivated account's JWT must die immediately, not live out its 24h
- * (this is the "still active" check the fresh findByPk exists for). Real SLO:
- * rejects any token issued before the user's revocation cutoff (sessions_invalid_after,
- * set to now() on every logout); payload.iat is seconds since epoch.
+ * Passport.js configuration for Hyperweaver Server
+ * Following ARMOR pattern - provider-agnostic OIDC implementation
  */
-passport.use(
-  'jwt',
-  new JwtStrategy(
-    {
-      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
-      secretOrKeyProvider: (request, rawJwtToken, done) => {
-        void request;
-        void rawJwtToken;
-        done(null, loadConfig('auth').authentication.jwt_secret);
-      },
-    },
-    async (payload, done) => {
+
+// Store OIDC configurations globally (ARMOR pattern)
+const oidcConfigurations = new Map();
+
+/**
+ * Get OIDC configuration for a provider
+ * @param {string} providerName - OIDC provider name
+ * @returns {Object|null} OIDC configuration or null if not found
+ */
+const getOidcConfiguration = providerName => oidcConfigurations.get(providerName);
+
+/**
+ * Build authorization URL for OIDC provider
+ * @param {string} providerName - OIDC provider name
+ * @param {string} redirectUri - Callback redirect URI
+ * @param {string} state - State parameter for CSRF protection
+ * @param {string} codeVerifier - PKCE code verifier
+ * @param {string|null} promptOverride - Per-request prompt value (e.g. 'none' for silent SSO)
+ * @returns {Promise<URL>} Authorization URL
+ */
+const buildAuthorizationUrl = async (
+  providerName,
+  redirectUri,
+  state,
+  codeVerifier,
+  promptOverride = null
+) => {
+  const authConfig = loadConfig('auth');
+  const config = oidcConfigurations.get(providerName);
+  if (!config) {
+    throw new Error(`OIDC configuration not found for provider: ${providerName}`);
+  }
+
+  const providerConfig = authConfig.auth.oidc.providers[providerName];
+  const codeChallenge = await calculatePKCECodeChallenge(codeVerifier);
+
+  const authParams = {
+    redirect_uri: redirectUri,
+    scope: providerConfig.scope || 'openid profile email',
+    state,
+    code_challenge: codeChallenge,
+    code_challenge_method: 'S256',
+  };
+
+  const prompt = promptOverride || providerConfig.prompt;
+  if (prompt) {
+    authParams.prompt = prompt;
+  }
+
+  log.auth.info('Building authorization URL', {
+    provider: providerName,
+    redirectUri,
+    prompt: prompt || 'default',
+  });
+
+  return _buildAuthorizationUrl(config, authParams);
+};
+
+/**
+ * Handle OIDC callback and authenticate user
+ * @param {string} providerName - OIDC provider name
+ * @param {URL} currentUrl - Current callback URL
+ * @param {string} state - Expected state value
+ * @param {string} codeVerifier - PKCE code verifier
+ * @returns {Promise<Object>} User and tokens
+ */
+const handleOidcCallback = async (providerName, currentUrl, state, codeVerifier) => {
+  const authConfig = loadConfig('auth');
+  const config = oidcConfigurations.get(providerName);
+  if (!config) {
+    throw new Error(`OIDC configuration not found for provider: ${providerName}`);
+  }
+
+  try {
+    log.auth.info('Processing OIDC callback', { provider: providerName });
+
+    const redirectUri = `${currentUrl.origin}/api/auth/oidc/callback`;
+
+    log.auth.debug('Token exchange parameters', {
+      provider: providerName,
+      redirectUri,
+      callbackUrl: currentUrl.toString(),
+      hasCode: currentUrl.searchParams.has('code'),
+      hasState: currentUrl.searchParams.has('state'),
+      stateMatch: currentUrl.searchParams.get('state') === state,
+    });
+
+    let tokens;
+    try {
+      tokens = await authorizationCodeGrant(config, currentUrl, {
+        expectedState: state,
+        pkceCodeVerifier: codeVerifier,
+      });
+    } catch (grantError) {
+      // Enhanced token exchange error logging
+      log.auth.error('Token exchange failed - DETAILED', {
+        provider: providerName,
+        error: grantError.message,
+        errorType: grantError.constructor.name,
+        errorCode: grantError.error,
+        errorDescription: grantError.error_description,
+        errorUri: grantError.error_uri,
+        // Request details for debugging
+        callbackUrl: currentUrl.toString(),
+        redirectUri,
+        hasCode: currentUrl.searchParams.has('code'),
+        hasState: currentUrl.searchParams.has('state'),
+        stateMatches: currentUrl.searchParams.get('state') === state,
+        codeLength: currentUrl.searchParams.get('code')?.length,
+        // PKCE details
+        hasCodeVerifier: !!codeVerifier,
+        codeVerifierLength: codeVerifier?.length,
+      });
+
+      // Re-throw with enhanced message for upstream handling
+      const enhancedError = new Error(
+        `OIDC token exchange failed: ${grantError.error || grantError.message}`
+      );
+      enhancedError.originalError = grantError;
+      enhancedError.provider = providerName;
+      enhancedError.error = grantError.error;
+      enhancedError.error_description = grantError.error_description;
+      throw enhancedError;
+    }
+
+    const userinfo = tokens.claims();
+    log.auth.debug('OIDC user claims received', {
+      provider: providerName,
+      subject: userinfo.sub,
+      email: userinfo.email,
+    });
+
+    const user = await externalUserHandler.handleExternalUser(
+      `oidc-${providerName}`,
+      userinfo,
+      db,
+      authConfig
+    );
+
+    if (user) {
+      log.auth.info('OIDC authentication successful', {
+        provider: providerName,
+        username: user.username,
+      });
+    }
+
+    return { user, tokens };
+  } catch (error) {
+    log.auth.error(`OIDC callback error for ${providerName}:`, error.message);
+    throw error;
+  }
+};
+
+/**
+ * Build end session URL for RP-initiated logout
+ * @param {string} providerName - OIDC provider name
+ * @param {string} postLogoutRedirectUri - Where to redirect after logout
+ * @param {string} state - State parameter
+ * @param {string} idToken - ID token hint
+ * @returns {URL|null} End session URL or null if not supported
+ */
+const buildEndSessionUrl = (providerName, postLogoutRedirectUri, state, idToken) => {
+  const config = oidcConfigurations.get(providerName);
+  if (!config) {
+    log.auth.warn(`OIDC configuration not found for provider: ${providerName}`);
+    return null;
+  }
+
+  const endSessionEndpoint = config.serverMetadata().end_session_endpoint;
+  if (!endSessionEndpoint) {
+    log.auth.info(
+      `Provider ${providerName} does not support end_session_endpoint, skipping RP-initiated logout`
+    );
+    return null;
+  }
+
+  const endSessionParams = {
+    post_logout_redirect_uri: postLogoutRedirectUri,
+    state,
+    id_token_hint: idToken,
+  };
+
+  log.auth.info('Building end session URL', {
+    provider: providerName,
+    endpoint: endSessionEndpoint,
+  });
+
+  return _buildEndSessionUrl(config, endSessionParams);
+};
+
+/**
+ * OIDC Provider Setup - Following ARMOR pattern
+ * No passport strategies - uses openid-client API directly
+ */
+const setupOidcProviders = async authConfig => {
+  const oidcProvidersConfig = authConfig.auth?.oidc?.providers || {};
+
+  if (!oidcProvidersConfig || Object.keys(oidcProvidersConfig).length === 0) {
+    log.app.info('No OIDC providers configured');
+    return;
+  }
+
+  log.app.info('Setting up OIDC authentication providers', {
+    providerCount: Object.keys(oidcProvidersConfig).length,
+  });
+
+  const providerPromises = Object.entries(oidcProvidersConfig).map(
+    async ([providerName, providerConfig]) => {
       try {
-        const { user: UserModel } = db;
-        const user = await UserModel.findByPk(payload.userId);
+        const {
+          enabled,
+          issuer,
+          client_id: clientId,
+          client_secret: clientSecret,
+        } = providerConfig;
 
-        if (!user || user.is_active === false) {
-          return done(null, false, { message: 'Invalid token - user not found' });
+        if (!enabled) {
+          log.app.info(`Skipping disabled OIDC provider: ${providerName}`);
+          return { success: false, provider: providerName, reason: 'disabled' };
         }
 
-        if (
-          user.sessions_invalid_after &&
-          payload.iat &&
-          payload.iat * 1000 < new Date(user.sessions_invalid_after).getTime()
-        ) {
-          return done(null, false, { message: 'Token revoked' });
+        if (!issuer || !clientId || !clientSecret) {
+          log.error.error(`Invalid OIDC provider configuration: ${providerName}`, {
+            hasIssuer: !!issuer,
+            hasClientId: !!clientId,
+            hasClientSecret: !!clientSecret,
+          });
+          return { success: false, provider: providerName, reason: 'invalid_config' };
         }
 
-        return done(null, {
-          userId: user.id,
-          username: user.username,
-          email: user.email,
-          role: user.role,
-          auth_provider: payload.auth_provider || user.auth_provider || 'local',
+        log.app.info(`Configuring OIDC provider: ${providerName}`, { issuer });
+
+        // Get token endpoint auth method from provider config (ARMOR pattern)
+        const authMethod = providerConfig.token_endpoint_auth_method || 'client_secret_basic';
+
+        log.app.info(`Using token endpoint auth method: ${authMethod}`, { provider: providerName });
+
+        // Create client authentication method (ARMOR pattern)
+        let clientAuth;
+        switch (authMethod) {
+          case 'client_secret_basic':
+            clientAuth = ClientSecretBasic(clientSecret);
+            break;
+          case 'client_secret_post':
+            clientAuth = ClientSecretPost(clientSecret);
+            break;
+          case 'none':
+            clientAuth = None();
+            break;
+          default:
+            clientAuth = ClientSecretBasic(clientSecret);
+        }
+
+        // Discover OIDC configuration with proper client authentication
+        const oidcConfig = await discovery(new URL(issuer), clientId, clientSecret, clientAuth);
+
+        // Store configuration for later use by helper functions
+        oidcConfigurations.set(providerName, oidcConfig);
+
+        log.app.info(`OIDC provider configured successfully: ${providerName}`, {
+          issuer,
+          authEndpoint: oidcConfig.serverMetadata().authorization_endpoint,
+          tokenEndpoint: oidcConfig.serverMetadata().token_endpoint,
+          endSessionEndpoint: oidcConfig.serverMetadata().end_session_endpoint || 'not supported',
         });
+
+        return { success: true, provider: providerName };
       } catch (error) {
-        log.auth.error('JWT Strategy error', { error: error.message });
-        return done(error, false);
+        log.error.error(`Failed to setup OIDC provider ${providerName}:`, {
+          error: error.message,
+          stack: error.stack,
+        });
+        return { success: false, provider: providerName, error: error.message };
       }
     }
-  )
-);
+  );
 
-passport.serializeUser((user, done) => {
-  done(null, user.userId);
-});
+  const results = await Promise.allSettled(providerPromises);
 
-passport.deserializeUser(async (userId, done) => {
-  try {
-    const { user: UserModel } = db;
-    const user = await UserModel.findByPk(userId);
-    done(null, user);
-  } catch (error) {
-    done(error, null);
-  }
-});
+  const successCount = results.filter(r => r.status === 'fulfilled' && r.value?.success).length;
+  const failCount = results.length - successCount;
 
-await setupLdapStrategy();
-await setupOidcProviders();
+  log.app.info('OIDC provider setup completed', {
+    total: results.length,
+    successful: successCount,
+    failed: failCount,
+  });
+};
 
-export { getOidcConfiguration };
+/**
+ * Initialize passport strategies
+ */
+const initializeStrategies = async () => {
+  const authConfig = loadConfig('auth');
 
-export default passport;
+  await setupOidcProviders(authConfig);
+
+  log.app.info('Passport strategies initialized');
+};
+
+export {
+  initializeStrategies,
+  getOidcConfiguration,
+  buildAuthorizationUrl,
+  handleOidcCallback,
+  buildEndSessionUrl,
+};

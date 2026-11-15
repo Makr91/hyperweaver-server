@@ -1,155 +1,125 @@
-import fs from 'fs';
-import path from 'path';
-import { Sequelize } from '@sequelize/core';
-import { SqliteDialect } from '@sequelize/sqlite3';
-import { PostgresDialect } from '@sequelize/postgres';
-import { MySqlDialect } from '@sequelize/mysql';
-import { MariaDbDialect } from '@sequelize/mariadb';
-import { loadConfig } from '../utils/config-loader.js';
-import { createMigrationHelper } from '../config/DatabaseMigrations.js';
-import { log, createTimer } from '../utils/Logger.js';
-
-const dbConfig = loadConfig('db').database;
-
-const { dialect } = dbConfig;
-const loggingEnabled = dbConfig.logging;
-
-// Sequelize 7 requires the dialect CLASS (not the v6 string). Map the
-// config dialect string to its corresponding @sequelize dialect class.
-const dialectClasses = {
-  sqlite: SqliteDialect,
-  postgresql: PostgresDialect,
-  mysql: MySqlDialect,
-  mariadb: MariaDbDialect,
-};
-
-const dialectClass = dialectClasses[dialect];
-if (!dialectClass) {
-  log.database.error('Unsupported database dialect', { dialect });
-  throw new Error(`Unsupported database dialect: ${dialect}`);
-}
-
-// Custom logging function for Sequelize
-const sequelizeLogging = loggingEnabled
-  ? (msg, timing) => {
-      // Parse the query to check if it's a slow query
-      if (timing && timing > 1000) {
-        log.database.warn('Slow database query', {
-          query: msg,
-          duration_ms: timing,
-        });
-      } else {
-        // Log regular queries at debug level
-        log.database.debug(msg, { timing });
-      }
-    }
-  : false;
-
-const sequelizeConfig = {
-  logging: sequelizeLogging,
-  dialect: dialectClass,
-  benchmark: true, // Enable timing for all queries
-};
-
-if (dialect === 'sqlite') {
-  // SQLite configuration - use storage from config
-  sequelizeConfig.storage = dbConfig.storage;
-
-  // Ensure the directory exists for SQLite database file
-  const storageDir = path.dirname(sequelizeConfig.storage);
-  if (!fs.existsSync(storageDir)) {
-    fs.mkdirSync(storageDir, { recursive: true, mode: 0o755 });
-    log.database.info('Created SQLite database directory', { directory: storageDir });
-  }
-
-  log.database.info('Using SQLite database', { storage: sequelizeConfig.storage });
-} else {
-  sequelizeConfig.host = dbConfig.host;
-  sequelizeConfig.port = dbConfig.port;
-  sequelizeConfig.pool = { ...dbConfig.pool };
-  sequelizeConfig.database = dbConfig.database_name;
-  sequelizeConfig.user = dbConfig.user;
-  sequelizeConfig.password = dbConfig.password;
-}
-
-const sequelize = new Sequelize(sequelizeConfig);
+import { dirname } from 'path';
+import { existsSync, mkdirSync } from 'fs';
+import Sequelize from 'sequelize';
+import { loadConfig, getSetupTokenPath } from '../utils/config-loader.js';
+import { log } from '../utils/Logger.js';
+import { snakeKeys } from '../utils/wire.js';
 
 const db = {};
 
 db.Sequelize = Sequelize;
-db.sequelize = sequelize;
+db.sequelize = null;
+db.ROLES = ['user', 'admin'];
 
-// Import models - using dynamic imports for ES modules
-const modelFiles = [
-  'user.model.js',
-  'organization.model.js',
-  'invitation.model.js',
-  'server.model.js',
-  'credential.model.js',
-  'serverOrg.model.js',
-  'machineOrg.model.js',
-  'revokedSession.model.js',
-];
+/**
+ * Open the database named by db.config.yaml and define every model on it;
+ * a second call while the connection is open does nothing.
+ * @returns {Promise<void>}
+ */
+const initializeDatabase = async () => {
+  if (db.sequelize) {
+    return;
+  }
+  const dbConfig = loadConfig('db');
+  const dialect = dbConfig.database_type;
+  const sequelizeConfig = { logging: dbConfig.sql.logging, dialect };
 
-// Initialize models - handle async imports properly
-const modelPromises = modelFiles.map(async file => {
-  try {
-    const { default: modelDefiner } = await import(`./${file}`);
-    const modelName = file.replace('.model.js', '');
-    return { modelName, modelDefiner };
-  } catch (error) {
-    log.database.warn('Could not load model', {
-      file,
-      error: error.message,
+  if (dialect === 'sqlite') {
+    sequelizeConfig.storage = dbConfig.sql.storage;
+    const storageDir = dirname(dbConfig.sql.storage);
+    if (!existsSync(storageDir)) {
+      mkdirSync(storageDir, { recursive: true, mode: 0o755 });
+      log.database.info('Created SQLite database directory', { storageDir });
+    }
+  } else {
+    sequelizeConfig.host = dbConfig.sql.host;
+    sequelizeConfig.port = dbConfig.sql.port;
+    sequelizeConfig.pool = {
+      max: dbConfig.mysql_pool.max,
+      min: dbConfig.mysql_pool.min,
+      acquire: dbConfig.mysql_pool.acquire,
+      idle: dbConfig.mysql_pool.idle,
+    };
+  }
+
+  const sequelize = new Sequelize(
+    dialect === 'sqlite' ? null : dbConfig.sql.database,
+    dialect === 'sqlite' ? null : dbConfig.sql.user,
+    dialect === 'sqlite' ? null : dbConfig.sql.password,
+    sequelizeConfig
+  );
+
+  db.sequelize = sequelize;
+
+  db.organization = (await import('./organizations.model.js')).default(sequelize, Sequelize);
+  db.user = (await import('./user.model.js')).default(sequelize, Sequelize);
+  db.role = (await import('./role.model.js')).default(sequelize, Sequelize);
+  db.invitation = (await import('./invitation.model.js')).default(sequelize, Sequelize);
+  db.service_account = (await import('./service_account.model.js')).default(sequelize, Sequelize);
+  db.credential = (await import('./credential.model.js')).default(sequelize, Sequelize);
+  db.UserOrg = (await import('./user-org.model.js')).default(sequelize, Sequelize);
+  db.Request = (await import('./request.model.js')).default(sequelize, Sequelize);
+  db.scimGroup = (await import('./scim-group.model.js')).default(sequelize, Sequelize);
+  db.revokedSession = (await import('./revoked-session.model.js')).default(sequelize, Sequelize);
+  db.server = (await import('./server.model.js')).default(sequelize, Sequelize);
+  db.serverOrg = (await import('./serverOrg.model.js')).default(sequelize, Sequelize);
+  db.machineOrg = (await import('./machineOrg.model.js')).default(sequelize, Sequelize);
+
+  db.UserOrg.associate = function (models) {
+    db.UserOrg.belongsTo(models.user, {
+      foreignKey: 'user_id',
+      as: 'user',
     });
-    return null;
-  }
-});
+    db.UserOrg.belongsTo(models.organization, {
+      foreignKey: 'organization_id',
+      as: 'organization',
+    });
+  };
 
-// Wait for all models to load
-const loadedModels = await Promise.all(modelPromises);
+  db.Request.associate = function (models) {
+    db.Request.belongsTo(models.user, {
+      foreignKey: 'user_id',
+      as: 'user',
+    });
+    db.Request.belongsTo(models.organization, {
+      foreignKey: 'organization_id',
+      as: 'organization',
+    });
+    db.Request.belongsTo(models.user, {
+      foreignKey: 'reviewed_by',
+      as: 'reviewer',
+    });
+  };
 
-// Create model instances
-loadedModels.forEach(result => {
-  if (result) {
-    const { modelName, modelDefiner } = result;
-    db[modelName] = modelDefiner(sequelize);
-  }
-});
-
-// Define associations after all models are loaded
-Object.keys(db).forEach(modelName => {
-  if (db[modelName].associate) {
-    db[modelName].associate(db);
-  }
-});
-
-// Test database connection and run migrations
-try {
-  const connectionTimer = createTimer('database_connection');
-  await sequelize.authenticate();
-  const connectionTime = connectionTimer.end();
-
-  log.database.info('Database connection established successfully', {
-    dialect,
-    duration_ms: connectionTime,
+  db.role.belongsToMany(db.user, {
+    through: 'user_roles',
+  });
+  db.user.belongsToMany(db.role, {
+    through: 'user_roles',
   });
 
-  // Initialize automatic migration system
-  const migrationTimer = createTimer('database_migration');
-  const migrationHelper = createMigrationHelper(sequelize);
-  await migrationHelper.setupDatabase();
-  const migrationTime = migrationTimer.end();
+  Object.keys(db).forEach(modelName => {
+    if (db[modelName].associate) {
+      db[modelName].associate(db);
+    }
+  });
 
-  log.database.info('Database migrations completed', {
-    duration_ms: migrationTime,
+  Object.keys(db).forEach(modelName => {
+    if (modelName === 'scimGroup' || !(db[modelName].prototype instanceof Sequelize.Model)) {
+      return;
+    }
+    db[modelName].prototype.toJSON = function () {
+      return snakeKeys(this.get({ plain: true }));
+    };
   });
-} catch (error) {
-  log.database.error('Unable to connect to database', {
-    error: error.message,
-    dialect,
-  });
-  throw error;
+};
+
+if (existsSync(getSetupTokenPath())) {
+  log.database.info('Setup token present; the database opens after the setup write');
+} else {
+  await initializeDatabase();
 }
+
+export { initializeDatabase };
 
 export default db;

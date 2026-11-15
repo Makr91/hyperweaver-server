@@ -1,7 +1,7 @@
 /*
  * Swagger UI dark theme for Hyperweaver — GitHub-dark palette, matching the
  * Hyperweaver UI and the docs site. Injected as swagger-ui-express `customCss`
- * on /api-docs and on the selected-agent /agent/api-docs relay. Kept in a file
+ * on /api/docs and on the selected-agent /agent/api-docs relay. Kept in a file
  * (not an inline string) so it stays maintainable. It overrides swagger-ui's
  * default light styling and hides the built-in topbar.
  */

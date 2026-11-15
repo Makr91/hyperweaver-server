@@ -5,7 +5,7 @@
 
 set -e
 
-LOG_TAG="Hyperweaver Server-certbot-hook"
+LOG_TAG="hyperweaver-server-certbot-hook"
 
 # Logging functions
 log_info() {
@@ -22,11 +22,11 @@ log_info "Hyperweaver Server Certbot deploy hook starting"
 
 # Step 1: Find Hyperweaver Server configuration directory
 # Use the same logic as Hyperweaver Server service to find CONFIG_DIR
-CONFIG_DIR=$(systemctl show Hyperweaver Server -p Environment 2>/dev/null | grep -o 'CONFIG_DIR=[^[:space:]]*' | cut -d= -f2)
+CONFIG_DIR=$(systemctl show hyperweaver-server -p Environment 2>/dev/null | grep -o 'CONFIG_DIR=[^[:space:]]*' | cut -d= -f2)
 
 # Fallback to default if not found
 if [ -z "$CONFIG_DIR" ]; then
-    CONFIG_DIR="/etc/Hyperweaver Server"
+    CONFIG_DIR="/etc/hyperweaver-server"
 fi
 
 CONFIG_FILE="$CONFIG_DIR/app.config.yaml"
@@ -56,10 +56,10 @@ try:
     with open('$CONFIG_FILE', 'r') as f:
         config = yaml.safe_load(f)
     
-    # Get origin URL from Hyperweaver Server config
-    origin_url = config['Hyperweaver Server']['origin']
+    # Get frontend URL from Hyperweaver Server config
+    origin_url = config['frontend']['frontend_url']
     
-    # Extract domain (e.g., 'https://Hyperweaver Server.example.com' -> 'Hyperweaver Server.example.com')
+    # Extract domain (e.g., 'https://hyperweaver-server.example.com' -> 'hyperweaver-server.example.com')
     parsed_url = urllib.parse.urlparse(origin_url)
     domain = parsed_url.netloc
     
@@ -147,20 +147,20 @@ cp "$CERT_DIR/privkey.pem" "$KEY_PATH"
 # Step 7: Set proper ownership and permissions
 log_info "Setting proper ownership and permissions"
 
-chown Hyperweaver Server:Hyperweaver Server "$CERT_PATH" "$KEY_PATH"
+chown hyperweaver-server:hyperweaver-server "$CERT_PATH" "$KEY_PATH"
 chmod 644 "$CERT_PATH"
 chmod 600 "$KEY_PATH"
 
 log_info "Certificates copied successfully"
 
 # Step 8: Restart Hyperweaver Server service to reload certificates
-if systemctl is-active --quiet Hyperweaver Server; then
+if systemctl is-active --quiet hyperweaver-server; then
     log_info "Restarting Hyperweaver Server service to reload certificates"
-    systemctl restart Hyperweaver Server
+    systemctl restart hyperweaver-server
     
     # Wait a moment and check if service started successfully
     sleep 2
-    if systemctl is-active --quiet Hyperweaver Server; then
+    if systemctl is-active --quiet hyperweaver-server; then
         log_info "Hyperweaver Server service restarted successfully"
     else
         log_error "Hyperweaver Server service failed to restart"

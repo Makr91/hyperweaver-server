@@ -1,36 +1,48 @@
 schemaVersion: 1
-authentication:
-  jwt_secret: ''
-  jwt_expiration: 24h
-  jwt_issuer: hyperweaver-server
-  jwt_audience: hyperweaver-ui
-  local_enabled: true
-  local_registration_enabled: true
-  local_require_email_verification: false
-  local_password_min_length: 8
-  local_password_require_uppercase: false
-  local_password_require_lowercase: false
-  local_password_require_numbers: false
-  local_password_require_symbols: false
-  local_bcrypt_rounds: 10
-  local_session_timeout: 24
-  local_allow_new_organizations: true
-  ldap_enabled: false
-  ldap_url: ldap://localhost:389
-  ldap_bind_dn: ''
-  ldap_bind_credentials: ''
-  ldap_search_base: ''
-  ldap_search_filter: (uid={{username}})
-  ldap_search_attributes: displayName,mail,memberOf
-  ldap_tls_reject_unauthorized: false
-  oidc_token_refresh_threshold_minutes: 5
-  oidc_providers: {}
-  external_domain_mapping_enabled: false
-  external_domain_mappings: '{}'
-  external_provisioning_enabled: false
-  external_provisioning_policy: invite_only
-  external_provisioning_default_role: user
-  external_provisioning_fallback_action: require_invite
-  external_profile_sync_enabled: true
-  external_profile_update_on_login: true
-  external_profile_sync_fields: displayName,email,groups
+auth:
+  jwt:
+    jwt_secret: 6b27ae2c8265b5aa8bd19f4650f75b904f5d6b33e3d31398807ada73f6d97471
+    jwt_expiration: 24h
+    jwt_issuer: hyperweaver-server
+    jwt_audience: hyperweaver-server-api
+    download_link_expiry: 1h
+    invitation_token_expiry_hours: 24
+    verification_token_expiry_hours: 24
+    service_account_max_expiry_days: 365
+    local_enabled: true
+  local:
+    local_require_email_verification: false
+    local_password_min_length: 15
+    local_password_require_uppercase: false
+    local_password_require_lowercase: false
+    local_password_require_numbers: false
+    local_password_require_symbols: false
+    local_bcrypt_rounds: 10
+    local_session_timeout: 24
+    local_allow_new_organizations: true
+  oidc:
+    default_provider: ''
+    silent_login: false
+    login_handoff_ttl_seconds: 60
+    token_default_expiry_minutes: 30
+    token_refresh_threshold_minutes: 5
+    s2s_client_id: hyperweaver_server_s2s
+    s2s_client_secret: ''
+    notifications_enabled: false
+    providers: {}
+  resource_server:
+    enabled: false
+    audience: hyperweaver-server
+  scim:
+    enabled: true
+    audience: hyperweaver-server
+  external:
+    domain_mapping_enabled: false
+    domain_mappings: '{}'
+    provisioning_enabled: false
+    provisioning_policy: invite_only
+    provisioning_default_role: user
+    provisioning_fallback_action: require_invite
+    profile_sync_enabled: true
+    profile_update_on_login: true
+    profile_sync_fields: displayName,email,groups

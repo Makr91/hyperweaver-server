@@ -1,0 +1,6 @@
+{
+  "type": "object",
+  "properties": {
+    "default_domain": { "$ref": "#/$defs/domainName" }
+  }
+}

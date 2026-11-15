@@ -1,284 +1,259 @@
-import { DataTypes, Op } from '@sequelize/core';
-
-export default sequelize => {
+export default (sequelize, Sequelize) => {
   const User = sequelize.define(
     'users',
     {
-      id: {
-        type: DataTypes.INTEGER,
-        primaryKey: true,
-        autoIncrement: true,
-      },
       username: {
-        type: DataTypes.STRING,
-        allowNull: false,
-        unique: true,
-        validate: {
-          notEmpty: true,
-          len: [3, 50],
-        },
+        type: Sequelize.STRING,
       },
       email: {
-        type: DataTypes.STRING,
-        allowNull: false,
-        unique: true,
-        validate: {
-          isEmail: true,
-          notEmpty: true,
-        },
-      },
-      password_hash: {
-        type: DataTypes.STRING,
-        allowNull: false,
-        columnName: 'password_hash',
-      },
-      role: {
-        type: DataTypes.STRING,
-        allowNull: false,
-        defaultValue: 'user',
-        validate: {
-          isIn: [['user', 'admin', 'super-admin', 'organization-admin']],
-        },
-      },
-      organization_id: {
-        type: DataTypes.INTEGER,
-        allowNull: true,
-        columnName: 'organization_id',
-        references: {
-          table: 'organizations',
-          key: 'id',
-        },
-      },
-      last_login: {
-        type: DataTypes.DATE,
-        allowNull: true,
-        columnName: 'last_login',
-      },
-      is_active: {
-        type: DataTypes.BOOLEAN,
-        defaultValue: true,
-        columnName: 'is_active',
-      },
-      auth_provider: {
-        type: DataTypes.STRING(50),
-        allowNull: true,
-        defaultValue: 'local',
-        columnName: 'auth_provider',
-        validate: {
-          isIn: [['local', 'ldap', 'oidc', 'oauth2', 'saml']],
-        },
-      },
-      external_id: {
-        type: DataTypes.STRING(255),
-        allowNull: true,
-        columnName: 'external_id',
-      },
-      linked_at: {
-        type: DataTypes.DATE,
-        allowNull: true,
-        columnName: 'linked_at',
-      },
-      sessions_invalid_after: {
-        type: DataTypes.DATE,
-        allowNull: true,
-        columnName: 'sessions_invalid_after',
+        type: Sequelize.STRING,
       },
       name: {
-        type: DataTypes.STRING(255),
+        type: Sequelize.STRING,
         allowNull: true,
+        comment:
+          'Human display name. Optional: SCIM displayName/name.formatted at provision/PUT, then the OIDC name claim at login (fresher, overwrites), else null and username is the render-time fallback',
+      },
+      password: {
+        type: Sequelize.STRING,
+        allowNull: true,
+      },
+      emailHash: {
+        type: Sequelize.STRING,
+      },
+      verified: {
+        type: Sequelize.BOOLEAN,
+        defaultValue: false,
+      },
+      verificationToken: {
+        type: Sequelize.STRING,
+      },
+      verificationTokenExpires: {
+        type: Sequelize.DATE,
+      },
+      suspended: {
+        type: Sequelize.BOOLEAN,
+        defaultValue: false,
+      },
+      preferredLanguage: {
+        type: Sequelize.STRING(35),
+        allowNull: true,
+        comment:
+          'RFC 7643 preferredLanguage: BCP 47 tag the user reads. Drives outbound mail and notification language. Null means unset and the org locale, then the configured default, apply',
+        field: 'preferred_language',
+      },
+      locale: {
+        type: Sequelize.STRING(35),
+        allowNull: true,
+        comment:
+          'RFC 7643 locale: BCP 47 tag for formatting (dates, numbers). Distinct from preferredLanguage and only a fallback for it',
+      },
+      preferredMode: {
+        type: Sequelize.STRING(10),
+        allowNull: true,
+        comment:
+          'The mode: light, dark, or auto. Null means unset and the operating system scheme applies',
+        field: 'preferred_mode',
+      },
+      preferredTheme: {
+        type: Sequelize.STRING(64),
+        allowNull: true,
+        field: 'preferred_theme',
+      },
+      preferredMotion: {
+        type: Sequelize.STRING(10),
+        allowNull: true,
+        field: 'preferred_motion',
+      },
+      timezone: {
+        type: Sequelize.STRING(64),
+        allowNull: true,
+        comment: 'RFC 7643 timezone: Olson name, stored for consumers that need it',
+      },
+      defaultDomain: {
+        type: Sequelize.STRING(253),
+        allowNull: true,
+        field: 'default_domain',
+      },
+      deployTarget: {
+        type: Sequelize.STRING(2048),
+        allowNull: true,
+        field: 'deploy_target',
+      },
+      sessionsInvalidAfter: {
+        type: Sequelize.DATE,
+        allowNull: true,
+        field: 'sessions_invalid_after',
+      },
+      authProvider: {
+        type: Sequelize.STRING(50),
+        allowNull: true,
+        defaultValue: 'local',
+        field: 'auth_provider',
+      },
+      externalId: {
+        type: Sequelize.STRING(255),
+        allowNull: true,
+        field: 'external_id',
+      },
+      linkedAt: {
+        type: Sequelize.DATE,
+        allowNull: true,
+        field: 'linked_at',
       },
       avatar_url: {
-        type: DataTypes.STRING(2048),
+        type: Sequelize.STRING,
         allowNull: true,
-        columnName: 'avatar_url',
+        comment:
+          'Provider avatar URL. Three-tier contract: SCIM photos at provision/PUT, then the OIDC picture claim at login (fresher, overwrites), else null and the email-hash gravatar is the render-time fallback',
+        field: 'avatar_url',
       },
-      preferred_language: {
-        type: DataTypes.STRING(10),
+      primary_organization_id: {
+        type: Sequelize.INTEGER,
         allowNull: true,
-        columnName: 'preferred_language',
+        references: {
+          model: 'organizations',
+          key: 'id',
+        },
+        onUpdate: 'CASCADE',
+        onDelete: 'SET NULL',
+        comment: 'Primary organization for this user (denormalized for performance)',
+        field: 'primary_organization_id',
       },
-      preferred_mode: {
-        type: DataTypes.STRING(10),
+      entitlements: {
+        type: Sequelize.JSON,
         allowNull: true,
-        columnName: 'preferred_mode',
+        comment:
+          'RFC 7643 core entitlements pushed by SCIM: array of {value,type,display}. Full desired state — absent attribute on push clears to null',
+        field: 'entitlements',
       },
-      preferred_theme: {
-        type: DataTypes.STRING(64),
+      givenName: {
+        type: Sequelize.STRING(255),
         allowNull: true,
-        columnName: 'preferred_theme',
+        field: 'given_name',
       },
-      preferred_motion: {
-        type: DataTypes.STRING(10),
+      familyName: {
+        type: Sequelize.STRING(255),
         allowNull: true,
-        columnName: 'preferred_motion',
+        field: 'family_name',
+      },
+      middleName: {
+        type: Sequelize.STRING(255),
+        allowNull: true,
+        field: 'middle_name',
+      },
+      mobileNumber: {
+        type: Sequelize.STRING(32),
+        allowNull: true,
+        field: 'mobile_number',
+      },
+      mobileNumberVerified: {
+        type: Sequelize.BOOLEAN,
+        allowNull: true,
+        field: 'mobile_number_verified',
+      },
+      addressLine1: {
+        type: Sequelize.STRING(255),
+        allowNull: true,
+        field: 'address_line1',
+      },
+      addressCity: {
+        type: Sequelize.STRING(128),
+        allowNull: true,
+        field: 'address_city',
+      },
+      addressState: {
+        type: Sequelize.STRING(128),
+        allowNull: true,
+        field: 'address_state',
+      },
+      addressPostalCode: {
+        type: Sequelize.STRING(32),
+        allowNull: true,
+        field: 'address_postal_code',
+      },
+      addressCountry: {
+        type: Sequelize.STRING(128),
+        allowNull: true,
+        field: 'address_country',
+      },
+      addressFormatted: {
+        type: Sequelize.TEXT,
+        allowNull: true,
+        field: 'address_formatted',
       },
     },
     {
-      // Table options
-      tableName: 'users',
-      timestamps: true,
-      createdAt: 'created_at',
-      updatedAt: 'updated_at',
-
-      // Indexes
       indexes: [
         {
-          fields: ['organization_id'],
+          unique: true,
+          fields: ['username'],
+          name: 'users_username',
         },
         {
-          fields: ['role'],
-        },
-        {
-          fields: ['is_active'],
-        },
-        {
-          fields: ['auth_provider'],
-        },
-        {
-          fields: ['external_id'],
+          unique: true,
+          fields: ['email'],
+          name: 'users_email',
         },
       ],
-
-      // Default scope excludes password_hash
-      defaultScope: {
-        attributes: {
-          exclude: ['password_hash'],
-        },
-      },
-
-      // Named scopes
-      scopes: {
-        // Include password hash for authentication
-        withPassword: {
-          attributes: {},
-        },
-        // Only active users
-        active: {
-          where: {
-            is_active: true,
-          },
-        },
-        // Include organization data
-        withOrganization: {
-          include: [
-            {
-              association: 'organization',
-              attributes: ['id', 'name'],
-            },
-          ],
-        },
-      },
     }
   );
 
-  // Instance methods
-  User.prototype.toJSON = function () {
-    const values = { ...this.get() };
-    // Always exclude password_hash when converting to JSON
-    delete values.password_hash;
-    return values;
-  };
-
-  // Associations
   User.associate = function (models) {
-    // User belongs to Organization
+    // Primary organization relationship (denormalized)
     User.belongsTo(models.organization, {
-      foreignKey: { name: 'organization_id', onDelete: 'CASCADE' },
-      as: 'organization',
+      foreignKey: 'primary_organization_id',
+      as: 'primaryOrganization',
     });
 
-    // User can have many Invitations (as the inviter)
-    User.hasMany(models.invitation, {
-      foreignKey: { name: 'invited_by_user_id', onDelete: 'CASCADE' },
-      as: 'sentInvitations',
+    // Multi-organization relationship through junction table
+    User.belongsToMany(models.organization, {
+      through: models.UserOrg,
+      foreignKey: 'user_id',
+      otherKey: 'organization_id',
+      as: 'organizations',
     });
 
-    // User can have many Servers (if servers are user-specific)
-    if (models.server) {
-      User.hasMany(models.server, {
-        foreignKey: { name: 'created_by', onDelete: 'SET NULL' },
-        as: 'servers',
-      });
-    }
-
-    // User can have many Credentials (external auth providers)
     User.hasMany(models.credential, {
-      foreignKey: { name: 'user_id', onDelete: 'CASCADE' },
+      foreignKey: 'user_id',
       as: 'credentials',
     });
-  };
-
-  // Class methods for common queries
-  User.findByEmail = function (email) {
-    return this.withScope('active').findOne({
-      where: { email },
+    User.hasMany(models.UserOrg, {
+      foreignKey: 'user_id',
+      as: 'userOrganizations',
+    });
+    User.hasMany(models.Request, {
+      foreignKey: 'user_id',
+      as: 'joinRequests',
     });
   };
 
-  User.findByUsername = function (username) {
-    return this.withScope('active').findOne({
-      where: { username },
-    });
+  /**
+   * Get user's role in specific organization
+   * @param {number} organizationId - Organization ID
+   * @returns {Promise<string|null>} Role name or null if not member
+   */
+  User.prototype.getOrganizationRole = async function (organizationId) {
+    const membership = await sequelize.models.UserOrg.findUserOrgRole(this.id, organizationId);
+    return membership ? membership.role : null;
   };
 
-  User.findByIdentifier = function (identifier) {
-    return this.withScope('active').findOne({
-      where: {
-        [Op.or]: [{ username: identifier }, { email: identifier }],
-      },
-    });
+  /**
+   * Check if user has specific role in organization
+   * @param {number} organizationId - Organization ID
+   * @param {string|string[]} requiredRole - Role(s) to check for
+   * @returns {Promise<boolean>}
+   */
+  User.prototype.hasOrganizationRole = function (organizationId, requiredRole) {
+    return sequelize.models.UserOrg.hasRole(this.id, organizationId, requiredRole);
   };
 
-  User.findActiveById = function (id) {
-    return this.withScope('active').findByPk(id);
-  };
-
-  User.findByOrganization = function (organizationId, includeInactive = false) {
-    const scope = includeInactive ? null : 'active';
-    return this.withScope(scope).findAll({
-      where: { organization_id: organizationId },
-      include: [
-        {
-          association: 'organization',
-          attributes: ['id', 'name'],
-        },
-      ],
-      order: [['created_at', 'DESC']],
-    });
-  };
-
-  User.findByRole = function (role) {
-    return this.withScope('active').findAll({
-      where: { role },
-      order: [['created_at', 'DESC']],
-    });
-  };
-
-  User.isFirstUser = async function () {
-    const count = await this.count({
-      where: { is_active: true },
-    });
-    return count === 0;
-  };
-
-  // External authentication methods
-  User.findByExternalId = function (provider, externalId) {
-    return this.withScope('active').findOne({
-      where: {
-        auth_provider: provider,
-        external_id: externalId,
-      },
-    });
-  };
-
-  User.findWithCredentials = function (userId) {
-    return this.withScope('active').findByPk(userId, {
-      include: [
-        {
-          association: 'credentials',
-        },
-      ],
-    });
+  /**
+   * Get all organizations user belongs to with roles
+   * @returns {Promise<UserOrg[]>}
+   */
+  User.prototype.getAllOrganizations = function () {
+    return sequelize.models.UserOrg.getUserOrganizations(this.id);
   };
 
   return User;

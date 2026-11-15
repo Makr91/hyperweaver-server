@@ -1,0 +1,149 @@
+// token.js
+import { loadConfig } from '../../utils/config-loader.js';
+import { resolveUserOrganizations } from '../../utils/userOrgs.js';
+import { log } from '../../utils/Logger.js';
+import { problem } from '../../utils/problem.js';
+import { hostRoleOf } from '../../utils/hostRole.js';
+import { buildSigninToken } from './signin.js';
+
+const IDP_CLAIMS = ['id_token', 'oidc_access_token', 'oidc_refresh_token', 'oidc_expires_at'];
+
+/**
+ * The identity-provider fields a refreshed BoxVault JWT carries forward: the
+ * set refreshed on this request when the OIDC refresh middleware ran, else
+ * the verified claims of the presented token; a local session carries none.
+ * @param {Object} source - `req.oidcTokens` or the verified token claims
+ * @returns {Object} The present fields only
+ */
+export const idpClaimsOf = source =>
+  Object.fromEntries(
+    IDP_CLAIMS.filter(key => source[key] !== undefined).map(key => [key, source[key]])
+  );
+
+/**
+ * @swagger
+ * /api/auth/refresh-token:
+ *   post:
+ *     summary: Refresh JWT token
+ *     description: Generate a new JWT token for stay-logged-in sessions
+ *     tags: [Authentication]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: false
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               stay_logged_in:
+ *                 type: boolean
+ *                 description: Whether to enable stay-logged-in for the new token
+ *     responses:
+ *       200:
+ *         description: Token refreshed successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 access_token:
+ *                   type: string
+ *                   description: New JWT access token
+ *                 stay_logged_in:
+ *                   type: boolean
+ *                   description: Stay-logged-in status
+ *                 organizations:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/Membership'
+ *                   description: Every membership in the identity provider's shape, the same list the new token's organizations claim carries
+ *                 entitlements:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       value:
+ *                         type: string
+ *                       type:
+ *                         type: string
+ *                       display:
+ *                         type: string
+ *                   description: RFC 7643 entitlements pushed by SCIM (empty array when none are stored)
+ *       403:
+ *         description: Token refresh not allowed
+ *         content:
+ *           application/problem+json:
+ *             schema:
+ *               $ref: '#/components/schemas/Problem'
+ *       500:
+ *         description: Internal server error
+ *         content:
+ *           application/problem+json:
+ *             schema:
+ *               $ref: '#/components/schemas/Problem'
+ */
+export const refreshToken = async (req, res) => {
+  try {
+    const authConfig = loadConfig('auth');
+    // Get user from request (set by authJwt middleware)
+    const { user } = req;
+    const { stay_logged_in: stayLoggedIn } = req.body || {};
+
+    // Get user's organizations for multi-org JWT (pointer-first primary)
+    const { userOrganizations, primaryOrgName } = await resolveUserOrganizations(user);
+
+    const claims = req.tokenClaims || {};
+    const idpClaims = idpClaimsOf(req.oidcTokens || claims);
+
+    let provider = claims.provider || user.authProvider;
+    if (!provider) {
+      provider = 'local';
+    }
+
+    const finalStayLoggedIn = stayLoggedIn || req.stayLoggedIn;
+
+    // Generate new token with multi-org data
+    const token = buildSigninToken({
+      user,
+      isServiceAccount: false,
+      stayLoggedIn: finalStayLoggedIn,
+      provider,
+      userOrganizations,
+      authConfig,
+      idpClaims,
+    });
+
+    const authorities = user.roles.map(role => `ROLE_${role.name.toUpperCase()}`);
+
+    return res.status(200).send({
+      id: user.id,
+      username: user.username,
+      name: user.name || null,
+      preferred_language: user.preferredLanguage || null,
+      preferred_mode: user.preferredMode || null,
+      preferred_theme: user.preferredTheme || null,
+      preferred_motion: user.preferredMotion || null,
+      email: user.email,
+      verified: user.verified,
+      email_hash: user.emailHash,
+      roles: authorities,
+      role: hostRoleOf(authorities, userOrganizations),
+      organization: primaryOrgName,
+      organizations: userOrganizations,
+      access_token: token,
+      is_service_account: false,
+      provider,
+      stay_logged_in: finalStayLoggedIn,
+      avatar_url: user.avatar_url,
+      entitlements: user.entitlements || [],
+    });
+  } catch (err) {
+    log.error.error('Error in refreshToken:', err);
+    return problem(res, req, {
+      status: 500,
+      type: 'internal',
+      title: req.__('auth.tokenRefreshError'),
+    });
+  }
+};

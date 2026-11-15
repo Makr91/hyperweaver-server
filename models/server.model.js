@@ -1,26 +1,25 @@
-import { DataTypes } from '@sequelize/core';
 import { attachServerRequestMethods } from './serverRequests.js';
 
 const AGENT_ROLES = ['agent', 'hyperweaver-agent', 'zoneweaver-agent'];
 
-export default sequelize => {
+export default (sequelize, Sequelize) => {
   const Server = sequelize.define(
     'servers',
     {
       id: {
-        type: DataTypes.INTEGER,
+        type: Sequelize.INTEGER,
         primaryKey: true,
         autoIncrement: true,
       },
       hostname: {
-        type: DataTypes.STRING,
+        type: Sequelize.STRING,
         allowNull: false,
         validate: {
           notEmpty: true,
         },
       },
       port: {
-        type: DataTypes.INTEGER,
+        type: Sequelize.INTEGER,
         allowNull: false,
         validate: {
           min: 1,
@@ -28,7 +27,7 @@ export default sequelize => {
         },
       },
       protocol: {
-        type: DataTypes.STRING,
+        type: Sequelize.STRING,
         allowNull: false,
         defaultValue: 'https',
         validate: {
@@ -36,51 +35,51 @@ export default sequelize => {
         },
       },
       entity_name: {
-        type: DataTypes.STRING,
+        type: Sequelize.STRING,
         allowNull: false,
-        columnName: 'entity_name',
+        field: 'entity_name',
         validate: {
           notEmpty: true,
         },
       },
       description: {
-        type: DataTypes.TEXT,
+        type: Sequelize.TEXT,
         allowNull: true,
       },
       api_key: {
-        type: DataTypes.STRING,
+        type: Sequelize.STRING,
         allowNull: false,
-        columnName: 'api_key',
+        field: 'api_key',
       },
       is_active: {
-        type: DataTypes.BOOLEAN,
+        type: Sequelize.BOOLEAN,
         defaultValue: true,
-        columnName: 'is_active',
+        field: 'is_active',
       },
       last_used: {
-        type: DataTypes.DATE,
+        type: Sequelize.DATE,
         allowNull: true,
-        columnName: 'last_used',
+        field: 'last_used',
       },
       allow_insecure: {
-        type: DataTypes.BOOLEAN,
+        type: Sequelize.BOOLEAN,
         defaultValue: false,
-        columnName: 'allow_insecure',
+        field: 'allow_insecure',
       },
       capabilities: {
         /**
          * Slim /status payload harvested from the agent (role, hypervisors, features,
          * console, auth, …)
          */
-        type: DataTypes.JSON,
+        type: Sequelize.JSON,
         allowNull: true,
-        columnName: 'capabilities',
+        field: 'capabilities',
       },
       last_seen: {
         /** Last successful /status poll; stale => agent unreachable (not auto-deactivated) */
-        type: DataTypes.DATE,
+        type: Sequelize.DATE,
         allowNull: true,
-        columnName: 'last_seen',
+        field: 'last_seen',
       },
     },
     {
@@ -119,7 +118,7 @@ export default sequelize => {
        * not resolve for proxying/WS (the empty-attrs form would otherwise drop the
        * defaultScope's is_active filter). byLastUsed declares the active-only filter and
        * api_key exclusion explicitly — a named scope must not depend on the default scope
-       * surviving withScope.
+       * surviving scope().
        */
       scopes: {
         withInactive: {
@@ -153,7 +152,8 @@ export default sequelize => {
   Server.associate = function (models) {
     if (models.user) {
       Server.belongsTo(models.user, {
-        foreignKey: { name: 'created_by', onDelete: 'SET NULL' },
+        foreignKey: 'created_by',
+        onDelete: 'SET NULL',
         as: 'creator',
       });
     }
@@ -188,15 +188,17 @@ export default sequelize => {
     apiKey,
     allowInsecure = false,
   }) {
-    const transaction = await sequelize.startUnmanagedTransaction();
+    const transaction = await sequelize.transaction();
 
     try {
-      const existingServer = await this.withScope('withInactive').findOne({
+      const existingServer = await this.scope('withInactive').findOne({
         where: { hostname, port, protocol },
       });
 
       if (existingServer && existingServer.is_active) {
-        throw new Error(`Server ${hostname}:${port} (${protocol}) already exists`);
+        throw Object.assign(new Error(`Server ${hostname}:${port} (${protocol}) already exists`), {
+          status: 409,
+        });
       }
 
       let finalApiKey;
@@ -210,7 +212,9 @@ export default sequelize => {
           allowInsecure
         );
         if (!testResult.success) {
-          throw new Error(`Provided API key is invalid: ${testResult.error}`);
+          throw Object.assign(new Error(`Provided API key is invalid: ${testResult.error}`), {
+            status: 502,
+          });
         }
         finalApiKey = apiKey;
       } else {
@@ -265,7 +269,7 @@ export default sequelize => {
   };
 
   Server.getAllServers = function () {
-    return this.withScope('byLastUsed').findAll();
+    return this.scope('byLastUsed').findAll();
   };
 
   /**

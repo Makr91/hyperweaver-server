@@ -5,17 +5,18 @@
 // and only mirrored locally once it succeeds. Its SCIM push converges every
 // other consumer; the local mirror just avoids a visible lag before that lands.
 //
-// Local accounts have no provider, so the BoxVault columns are the whole story.
+// Local accounts have no provider, so the local columns are the whole story.
 import axios from 'axios';
 import { log } from '../../utils/Logger.js';
 import { problem, refuse } from '../../utils/problem.js';
+import { getSiteConfig } from '../../utils/config-loader.js';
 import db from '../../models/index.js';
 import { getAuthServerUrl, extractOidcAccessToken } from '../favorites/helpers.js';
 import { notifyProfileUpdated } from '../../utils/events.js';
+import { getRulesDocument } from '../../utils/rules.js';
+import { validateValue } from '../../utils/validation.js';
 
 const { user: User } = db;
-
-const getSiteConfig = () => null;
 
 const badRequest = (req, res, title) =>
   problem(res, req, { status: 400, type: 'bad-request', title });
@@ -121,6 +122,26 @@ const findInvalidField = body => {
 };
 
 /**
+ * The failing rule of the default_domain member under the `preferences` form
+ * of the rules document: an absent or clearing value passes.
+ * @param {Object} body - Request body
+ * @returns {{pointer: string, rule: string, params: Object}|null} The failing rule, or null
+ */
+const domainError = body => {
+  const { default_domain: defaultDomain } = body;
+  if (typeof defaultDomain === 'undefined' || isClearing(defaultDomain)) {
+    return null;
+  }
+  const document = getRulesDocument();
+  const [failure] = validateValue(
+    document.forms.preferences.properties.default_domain,
+    defaultDomain,
+    document
+  );
+  return failure ? { ...failure, pointer: '/default_domain' } : null;
+};
+
+/**
  * Map the wire keys onto the stored columns, skipping absent ones so an
  * omitted key leaves the stored value untouched.
  * @param {Object} body - Validated request body
@@ -129,10 +150,12 @@ const findInvalidField = body => {
 const buildPatch = body => {
   const patch = {};
   const columns = {
-    language: 'preferred_language',
-    mode: 'preferred_mode',
-    theme: 'preferred_theme',
-    motion: 'preferred_motion',
+    language: 'preferredLanguage',
+    mode: 'preferredMode',
+    theme: 'preferredTheme',
+    motion: 'preferredMotion',
+    timezone: 'timezone',
+    default_domain: 'defaultDomain',
   };
 
   for (const [key, column] of Object.entries(columns)) {
@@ -144,11 +167,45 @@ const buildPatch = body => {
 };
 
 const toWireShape = user => ({
-  language: user.preferred_language || null,
-  mode: user.preferred_mode || null,
-  theme: user.preferred_theme || null,
-  motion: user.preferred_motion || null,
+  language: user.preferredLanguage || null,
+  mode: user.preferredMode || null,
+  theme: user.preferredTheme || null,
+  motion: user.preferredMotion || null,
+  timezone: user.timezone || null,
+  default_domain: user.defaultDomain || null,
 });
+
+/**
+ * @swagger
+ * /api/user/preferences:
+ *   get:
+ *     summary: The signed-in user's preferences
+ *     description: language, mode, theme, motion, timezone and default_domain as stored, each null while unset.
+ *     tags: [Users]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: The preferences
+ *       404:
+ *         description: User not found
+ *         content:
+ *           application/problem+json:
+ *             schema:
+ *               $ref: '#/components/schemas/Problem'
+ */
+export const getPreferences = async (req, res) => {
+  const user = await User.findByPk(req.userId);
+  if (!user) {
+    return problem(res, req, {
+      status: 404,
+      type: 'not-found',
+      title: req.__('users.userNotFound'),
+    });
+  }
+  res.set('Cache-Control', 'no-store');
+  return res.status(200).send(toWireShape(user));
+};
 
 const delegateToProvider = async (req, body) => {
   const oidcAccessToken = extractOidcAccessToken(req);
@@ -201,6 +258,11 @@ const delegateToProvider = async (req, body) => {
  *               timezone:
  *                 type: string
  *                 nullable: true
+ *                 description: An IANA zone id; null follows the device
+ *               default_domain:
+ *                 type: string
+ *                 nullable: true
+ *                 description: The domain a bare machine name takes on a create, a DNS name; null leaves the choice to the organization or the agent
  *     responses:
  *       200:
  *         description: Updated preferences
@@ -225,7 +287,7 @@ const delegateToProvider = async (req, body) => {
  *                   type: string
  *                   nullable: true
  *       422:
- *         description: The theme is not a bare name, or not one this hostname offers
+ *         description: The theme is not a bare name, or not one this hostname offers, or default_domain breaks the domainName pattern of /api/rules
  *         content:
  *           application/problem+json:
  *             schema:
@@ -262,9 +324,9 @@ export const updatePreferences = async (req, res) => {
   if (invalidField) {
     return badRequest(req, res, req.__('users.preferenceInvalid', { invalidField }));
   }
-  const themeFailure = themeError(body, req.hostname);
-  if (themeFailure) {
-    return refuse(res, req, [themeFailure]);
+  const failures = [themeError(body, req.hostname), domainError(body)].filter(Boolean);
+  if (failures.length > 0) {
+    return refuse(res, req, failures);
   }
 
   try {
@@ -285,7 +347,7 @@ export const updatePreferences = async (req, res) => {
       return res.status(200).send(toWireShape(user));
     }
 
-    if (user.auth_provider && user.auth_provider !== 'local') {
+    if (user.authProvider && user.authProvider !== 'local') {
       try {
         const delegated = await delegateToProvider(req, body);
         if (!delegated) {

@@ -98,6 +98,7 @@ export const securityLogger = createCategoryLogger('security', 'security');
 export const vncLogger = createCategoryLogger('vnc', 'vnc');
 export const terminalLogger = createCategoryLogger('terminal', 'terminal');
 export const zloginLogger = createCategoryLogger('zlogin', 'zlogin');
+export const errorLogger = appLogger.child({ category: 'error' });
 
 /**
  * Helper function to safely log with fallback to console. Strips circular references
@@ -146,6 +147,13 @@ const safeLog = (logger, level, message, meta = {}) => {
  * Convenience logging functions for each category
  */
 export const log = {
+  error: {
+    info: (msg, meta) => safeLog(errorLogger, 'info', msg, meta),
+    warn: (msg, meta) => safeLog(errorLogger, 'warn', msg, meta),
+    error: (msg, meta) => safeLog(errorLogger, 'error', msg, meta),
+    debug: (msg, meta) => safeLog(errorLogger, 'debug', msg, meta),
+  },
+
   monitoring: {
     info: (msg, meta) => safeLog(monitoringLogger, 'info', msg, meta),
     warn: (msg, meta) => safeLog(monitoringLogger, 'warn', msg, meta),

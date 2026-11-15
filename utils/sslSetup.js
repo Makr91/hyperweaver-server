@@ -1,8 +1,8 @@
 import fs from 'fs';
-import { loadConfig } from './config.js';
+import { loadConfig } from './config-loader.js';
 import { log } from './Logger.js';
 
-const config = loadConfig();
+const config = loadConfig('app');
 
 /**
  * Generate SSL certificates if they don't exist and ssl_generate is enabled

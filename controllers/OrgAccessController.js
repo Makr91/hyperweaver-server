@@ -12,7 +12,7 @@ const validOrgList = value =>
  * /api/servers/{serverId}/orgs:
  *   get:
  *     summary: List the orgs that own a registered agent (Admin only)
- *     description: Returns the org uuids owning this agent. An agent with no orgs is open to every authenticated user of this Server.
+ *     description: Returns the org uuids owning this agent. An agent with no orgs is reached by a global admin alone; a machine's own orgs still reach that machine.
  *     tags: [Organization Access]
  *     security:
  *       - JwtAuth: []
@@ -64,7 +64,7 @@ export const getServerOrgs = async (req, res) => {
  * /api/servers/{serverId}/orgs:
  *   put:
  *     summary: Set the orgs that own a registered agent (Admin only)
- *     description: Replaces the agent's owning-org list. Owning orgs see the whole agent including machines with no org assignment. An empty list reopens the agent to every authenticated user.
+ *     description: Replaces the agent's owning-org list. Owning orgs see the whole agent including machines with no org assignment. An empty list leaves the agent to a global admin alone.
  *     tags: [Organization Access]
  *     security:
  *       - JwtAuth: []
@@ -116,7 +116,7 @@ export const setServerOrgs = async (req, res) => {
     await ServerOrgModel.setOrgsForServer(parseInt(req.params.serverId), orgs);
 
     log.auth.info('Agent org ownership updated', {
-      user: req.user.username,
+      user: req.userId,
       serverId: req.params.serverId,
       orgs,
     });
@@ -242,7 +242,7 @@ export const setMachineOrgs = async (req, res) => {
     );
 
     log.auth.info('Machine org assignment updated', {
-      user: req.user.username,
+      user: req.userId,
       serverId: req.params.serverId,
       machine: req.params.machineName,
       orgs,

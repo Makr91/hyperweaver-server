@@ -1,0 +1,541 @@
+{
+  "auth": {
+    "serviceAccountExpired": "La cuenta de servicio ha caducado.",
+    "userNotFound": "Usuario no encontrado.",
+    "invalidPassword": "¡Contraseña inválida!",
+    "invalidCredentials": "Nombre de usuario o contraseña inválidos.",
+    "signinError": "Error durante el proceso de inicio de sesión",
+    "invalidInvitationToken": "Token de invitación inválido.",
+    "invitationTokenExpired": "El token de invitación ha caducado.",
+    "invitationAlreadyUsed": "Esta invitación ya ha sido utilizada.",
+    "invitationEmailMismatch": "Esta invitación fue enviada a {{email}}. Por favor regístrate con esa dirección de correo electrónico.",
+    "invalidUsername": "Nombre de usuario inválido. Solo se permiten letras, dígitos, guion y punto (sin puntos consecutivos).",
+    "usernameOrEmailInUse": "El nombre de usuario o correo electrónico ya está en uso.",
+    "userRegistered": "¡Usuario registrado exitosamente! Si está configurado, se enviará un correo de verificación a su dirección de correo electrónico.",
+    "signupError": "Ocurrió un error al registrar el usuario.",
+    "unauthorized": "¡No autorizado!",
+    "invalidVerificationToken": "Token de verificación inválido.",
+    "tokenExpired": "El token de verificación ha caducado.",
+    "emailVerified": "Correo electrónico verificado exitosamente.",
+    "userAlreadyVerified": "El usuario ya está verificado.",
+    "verificationEmailResent": "Correo de verificación reenviado exitosamente.",
+    "tokenRefreshNotAllowed": "La actualización del token solo se permite para sesiones con 'mantener sesión iniciada'",
+    "tokenRefreshError": "Error al actualizar el token",
+    "accountSuspended": "Cuenta suspendida. Contacta a tu administrador.",
+    "invalidLoginCode": "Código de inicio de sesión inválido o caducado.",
+    "invalidToken": "Token inválido.",
+    "forbidden": "Acceso denegado.",
+    "emailNotVerified": "Por favor verifica tu dirección de correo electrónico antes de iniciar sesión.",
+    "localAuthDisabled": "La autenticación con nombre de usuario y contraseña está deshabilitada.",
+    "newOrganizationsDisabled": "El registro por cuenta propia está deshabilitado. Solicita una invitación para unirte a una organización.",
+    "registrationDisabled": "La creación de cuentas está deshabilitada en este servidor.",
+    "passwordTooShort": "La contraseña debe tener al menos {{min}} caracteres.",
+    "passwordRequiresUppercase": "La contraseña debe contener al menos una letra mayúscula.",
+    "passwordRequiresLowercase": "La contraseña debe contener al menos una letra minúscula.",
+    "passwordRequiresNumber": "La contraseña debe contener al menos un número.",
+    "passwordRequiresSymbol": "La contraseña debe contener al menos un símbolo especial.",
+    "vagrantInvalidToken": "Token de cuenta de servicio inválido o caducado.",
+    "roleDoesNotExist": "El rol no existe: {{role}}.",
+    "noTokenProvided": "¡No se proporcionó ningún token!",
+    "serviceAccountCannotRefresh": "Las cuentas de servicio no pueden actualizar tokens",
+    "verificationError": "Error al verificar la autenticación",
+    "requireServiceAccount": "¡Se requiere el rol de cuenta de servicio!",
+    "serviceAccountsDenied": "Acceso denegado para cuentas de servicio. Este punto de acceso es solo para usuarios.",
+    "requireUserOrAdmin": "¡Se requiere el rol de usuario o administrador!",
+    "requireAdminOrSelf": "¡Se requiere el rol de administrador o ser el propietario de la cuenta!",
+    "requireAdmin": "¡Se requiere el rol de administrador!",
+    "permissionCheckError": "Error al verificar los permisos del usuario",
+    "invalidBasicAuthFormat": "Formato de autenticación básica inválido.",
+    "issuersLoadError": "Error al cargar los emisores de confianza",
+    "methodsLoadError": "Error al cargar los métodos de autenticación"
+  },
+  "problems": {
+    "validation": "La solicitud no pasó la validación.",
+    "conflict": "Un valor de la solicitud ya está en uso.",
+    "badRequest": "La solicitud no se pudo leer.",
+    "authentication": "Se requiere autenticación.",
+    "forbidden": "La solicitud no está permitida.",
+    "notFound": "El recurso no se encontró.",
+    "payloadTooLarge": "La solicitud es demasiado grande.",
+    "throttled": "Demasiadas solicitudes.",
+    "internal": "El servidor no pudo completar la solicitud.",
+    "sendFailed": "El mensaje no se pudo enviar.",
+    "badGateway": "No se pudo contactar con el servicio detrás de esta solicitud.",
+    "configValidation": "La configuración no pasó la validación."
+  },
+  "validation": {
+    "required": "{{field}} es obligatorio.",
+    "type": "{{field}} debe ser de tipo {{type}}.",
+    "minLength": "{{field}} debe tener al menos {{minLength}} caracteres.",
+    "maxLength": "{{field}} debe tener como máximo {{maxLength}} caracteres.",
+    "pattern": "{{field}} debe coincidir con {{pattern}}.",
+    "minimum": "{{field}} debe ser al menos {{minimum}}.",
+    "maximum": "{{field}} debe ser como máximo {{maximum}}.",
+    "enum": "{{field}} debe ser uno de: {{enum}}.",
+    "format": "{{field}} debe ser un {{format}} válido.",
+    "minItems": "{{field}} debe tener al menos {{minItems}} elementos.",
+    "maxItems": "{{field}} debe tener como máximo {{maxItems}} elementos.",
+    "unique": "{{field}} ya está en uso en {{scope}}.",
+    "blocklist": "{{field}} está en la lista de bloqueo.",
+    "writable": "{{field}} no es escribible por el usuario del servicio.",
+    "reachable": "{{field}} no respondió.",
+    "readOnly": "{{field}} lo gestiona el proveedor de identidad.",
+    "withinParent": "Mantén {{field}} dentro de {{parent}}, el ajuste del nivel superior.",
+    "publicAddress": "{{field}} debe indicar una dirección pública.",
+    "matchesContent": "{{field}} no coincide con los bytes recibidos."
+  },
+  "organizations": {
+    "organizationNotFoundWithName": "Organización no encontrada con el nombre: {{organization}}.",
+    "organizationNotFound": "Organización no encontrada.",
+    "invalidAccessMode": "Modo de acceso inválido. Debe ser privado, solo invitación o solicitud para unirse.",
+    "invalidDefaultRole": "Rol predeterminado inválido. Debe ser miembro, administrador o invitado.",
+    "accessModeUpdated": "¡Modo de acceso de la organización actualizado exitosamente!",
+    "updateAccessModeError": "Error al actualizar el modo de acceso de la organización",
+    "nameCannotBeEmpty": "¡La organización no puede estar vacía!",
+    "createError": "Ocurrió un error al crear la Organización.",
+    "deleted": "Organización y sus archivos eliminados exitosamente.",
+    "deleteError": "Ocurrió un error al eliminar la organización.",
+    "discoverError": "Error al obtener organizaciones descubribles",
+    "findAllError": "Ocurrió un error al recuperar las organizaciones.",
+    "findOneError": "Error al recuperar la Organización con nombre={{organization}}",
+    "findUsersError": "Ocurrió un error al recuperar los usuarios.",
+    "userNotMember": "¡El usuario no es miembro de esta organización!",
+    "cannotRemoveOnlyOrg": "¡No se puede eliminar al usuario de su única organización! El usuario debe pertenecer al menos a una organización.",
+    "cannotRemoveLastOwner": "¡No se puede eliminar al único propietario de la organización! Asigna otro propietario primero.",
+    "cannotDemoteLastOwner": "¡No se puede degradar al único propietario de la organización! Asigna otro propietario primero.",
+    "cannotLeaveLastOwner": "¡No puedes dejar la organización siendo su único propietario! Asigna otro propietario primero.",
+    "userRemoved": "Usuario {{username}} eliminado de la organización",
+    "removeUserError": "Error al eliminar usuario de la organización",
+    "removeRequiresHigherRole": "Necesitas un rol superior en esta organización al del miembro que estás eliminando.",
+    "resumed": "¡Organización reanudada exitosamente!",
+    "resumeError": "Ocurrió un error al reanudar la organización.",
+    "suspended": "¡Organización suspendida exitosamente!",
+    "suspendError": "Ocurrió un error al suspender la organización.",
+    "invalidOrgCode": "Código de organización inválido. Debe tener exactamente 6 caracteres hexadecimales (0-9, A-F).",
+    "orgCodeInUse": "El código de organización {{org_code}} ya está en uso.",
+    "updated": "Organización actualizada exitosamente.",
+    "updateError": "Ocurrió un error al actualizar la organización.",
+    "invalidRole": "Rol inválido. Debe ser invitado, miembro, administrador o propietario.",
+    "userRoleUpdated": "Rol de usuario actualizado a {{role}}",
+    "updateUserRoleError": "Error al actualizar el rol del usuario",
+    "cannotLeaveOnlyOrg": "¡No puedes dejar tu única organización! Debes pertenecer al menos a una organización.",
+    "leftOrganization": "Has dejado exitosamente la organización {{orgName}}",
+    "leaveError": "Error al dejar la organización",
+    "externallyManaged": "Esta organización está gestionada por tu proveedor de identidad. La membresía, los roles y el ciclo de vida de la organización se gestionan allí y se sincronizan con Hyperweaver Server automáticamente.",
+    "externallyManagedRename": "Esta organización está gestionada por tu proveedor de identidad y no se puede renombrar en Hyperweaver Server. Su nombre visible se actualiza automáticamente cuando se renombra en el proveedor.",
+    "externallyManagedProfile": "Esta organización está gestionada por tu proveedor de identidad. Su perfil (correo electrónico, descripción y código de organización) se sincroniza desde el proveedor y no se puede editar en Hyperweaver Server.",
+    "alreadyMember": "Ya eres miembro de esta organización.",
+    "joinedAsAdmin": "Te has unido a la organización {{organization}} como propietario.",
+    "joinError": "Error al unirse a la organización",
+    "parameterRequired": "¡Se requiere el parámetro de organización!",
+    "requireAdminOrOwner": "¡Se requiere el rol de administrador o propietario en esta organización!",
+    "requireOwner": "¡Se requiere el rol de propietario en esta organización!",
+    "requireWriter": "¡Un invitado de esta organización puede leer y descargar, nunca cambiar nada!",
+    "membershipCheckError": "Error al verificar la membresía de la organización",
+    "permissionCheckError": "Error al verificar los permisos de la organización",
+    "managementCheckError": "Error al verificar el origen de gestión de la organización",
+    "contextMissing": "Falta el contexto de la organización"
+  },
+  "boxes": {
+    "boxNotFoundInOrg": "Box {{boxId}} no encontrada en la organización {{organization}}.",
+    "boxNotFound": "Box no encontrada.",
+    "boxNotFoundWithName": "Box no encontrada con el nombre: {{name}}.",
+    "privateBoxAccessDenied": "Acceso denegado. La Box privada requiere autenticación.",
+    "nameCannotBeEmpty": "¡El nombre no puede estar vacío!",
+    "create": {
+      "error": "Ocurrió un error al crear la Caja."
+    },
+    "boxDeleted": "¡Box eliminada exitosamente!",
+    "discover": {
+      "error": "Ocurrió un error al recuperar las cajas."
+    },
+    "unauthorized": "Acceso no autorizado a Box privada.",
+    "download": {
+      "error": "Error al procesar la solicitud de descarga"
+    },
+    "findOne": {
+      "error": "Error al recuperar la Box con nombre={{name}}."
+    },
+    "update": {
+      "permissionDenied": "Solo puedes actualizar Boxes que posees, o necesitas rol de administrador/propietario.",
+      "error": "Ocurrió un error al actualizar la Caja."
+    },
+    "organizationDetails": {
+      "error": "Ocurrió un error al recuperar los detalles de la organización."
+    },
+    "delete": {
+      "permissionDenied": "Solo puedes eliminar Boxes que posees, o necesitas rol de administrador/propietario."
+    },
+    "artwork": {
+      "tooLarge": "¡El tamaño del archivo de arte no puede ser mayor a {{size}}MB!",
+      "unsupportedType": "Tipo de arte no soportado. Solo se permiten imágenes SVG, PNG y JPEG.",
+      "notFound": "Arte no encontrado."
+    },
+    "watch": {
+      "error": "Ocurrió un error al actualizar el seguimiento de la box.",
+      "listError": "Ocurrió un error al recuperar las boxes seguidas."
+    }
+  },
+  "versions": {
+    "versionNotFoundInBox": "Versión {{versionNumber}} no encontrada para la Box {{boxId}} en la organización {{organization}}.",
+    "versionNotFoundForBox": "Versión {{versionNumber}} no encontrada para la Box {{boxId}}.",
+    "versionNotFound": "Versión no encontrada.",
+    "deprecationReasonRequired": "Se requiere un motivo de obsolescencia no vacío al marcar una versión como obsoleta.",
+    "unauthorized": "Acceso no autorizado a versiones.",
+    "findAll": {
+      "error": "Ocurrió un error al recuperar las versiones."
+    },
+    "create": {
+      "permissionDenied": "Solo puedes crear versiones para Boxes que posees, o necesitas rol de administrador/propietario.",
+      "error": "Ocurrió un error al crear la Versión."
+    },
+    "update": {
+      "permissionDenied": "Solo puedes actualizar versiones de Boxes que posees, o necesitas rol de administrador/propietario."
+    },
+    "delete": {
+      "permissionDenied": "Solo puedes eliminar versiones de Boxes que posees, o necesitas rol de administrador/propietario."
+    },
+    "versionDeleted": "¡Versión eliminada exitosamente!",
+    "deletedAll": "¡Todas las versiones eliminadas exitosamente!",
+    "notFoundToDelete": "No se encontraron versiones para eliminar.",
+    "deleteAll": {
+      "error": "Ocurrió un error al eliminar las versiones."
+    }
+  },
+  "providers": {
+    "providerNotFoundInVersion": "Proveedor {{providerName}} no encontrado para la versión {{versionNumber}} en la Box {{boxId}}.",
+    "providerNotFound": "Proveedor no encontrado.",
+    "create": {
+      "permissionDenied": "Solo puedes crear proveedores para Boxes que posees, o necesitas rol de administrador/propietario.",
+      "error": "Ocurrió un error al crear el Proveedor."
+    },
+    "delete": {
+      "permissionDenied": "Solo puedes eliminar proveedores para Boxes que posees, o necesitas rol de administrador/propietario."
+    },
+    "providerDeleted": "¡Proveedor y arquitecturas asociadas eliminados exitosamente!",
+    "deletedAll": "¡Todos los proveedores eliminados exitosamente!",
+    "notFoundToDelete": "No se encontraron proveedores para eliminar.",
+    "deleteAll": {
+      "error": "Ocurrió un error al eliminar los proveedores."
+    },
+    "unauthorized": "Acceso no autorizado a proveedores.",
+    "findAll": {
+      "error": "Ocurrió un error al recuperar los proveedores."
+    },
+    "findOne": {
+      "error": "Ocurrió un error al recuperar el Proveedor."
+    },
+    "update": {
+      "permissionDenied": "Solo puedes actualizar proveedores para Boxes que posees, o necesitas rol de administrador/propietario.",
+      "error": "Ocurrió un error al actualizar el Proveedor."
+    },
+    "notFound": "Proveedor no encontrado"
+  },
+  "architectures": {
+    "delete": {
+      "permissionDenied": "Solo puedes eliminar arquitecturas para Boxes que posees, o necesitas rol de administrador/propietario.",
+      "error": "Ocurrió un error al eliminar las arquitecturas."
+    },
+    "deletedAll": "¡Todas las arquitecturas eliminadas exitosamente!",
+    "notFoundToDelete": "No se encontraron arquitecturas para eliminar.",
+    "unauthorized": "Acceso no autorizado a la arquitectura.",
+    "findAll": {
+      "error": "Ocurrió un error al recuperar las arquitecturas."
+    },
+    "create": {
+      "permissionDenied": "Solo puedes crear arquitecturas para Boxes que posees, o necesitas rol de administrador/propietario.",
+      "error": "Ocurrió un error al crear la Arquitectura."
+    },
+    "deleted": "¡Arquitectura eliminada exitosamente!",
+    "notFound": "Arquitectura no encontrada.",
+    "findOne": {
+      "error": "Ocurrió un error al recuperar la Arquitectura."
+    },
+    "update": {
+      "permissionDenied": "Solo puedes actualizar arquitecturas para Boxes que posees, o necesitas rol de administrador/propietario.",
+      "error": "Ocurrió un error al actualizar la Arquitectura."
+    }
+  },
+  "users": {
+    "deleted": "¡El usuario fue eliminado exitosamente!",
+    "cannotDelete": "No se puede eliminar el Usuario con id={{userId}}. ¡Quizás el Usuario no fue encontrado!",
+    "cannotDeleteSoleOwner": "No se puede eliminar esta cuenta mientras sea el único propietario de la organización {{organization}}, que aún tiene otros miembros. Transfiere o elimina esa organización primero.",
+    "delete": {
+      "error": "No se pudo eliminar el Usuario con id={{userId}}"
+    },
+    "userNotFound": "Usuario no encontrado.",
+    "resumed": "¡Usuario reanudado exitosamente!",
+    "resume": {
+      "error": "Ocurrió un error al reanudar el usuario."
+    },
+    "suspended": "Usuario suspendido exitosamente.",
+    "suspend": {
+      "error": "Ocurrió un error al suspender el usuario."
+    },
+    "updated": "¡Usuario actualizado exitosamente!",
+    "emailChanged": "¡Correo electrónico cambiado exitosamente!",
+    "nameChanged": "¡Nombre visible cambiado exitosamente!",
+    "rolesUpdated": "¡Roles globales actualizados exitosamente!",
+    "lastAdmin": "Esta cuenta es la última administradora. Convierte otra cuenta en administradora primero.",
+    "roles": {
+      "error": "Ocurrió un error al actualizar los roles del usuario."
+    },
+    "preferenceInvalid": "El valor proporcionado para {{invalidField}} no es válido.",
+    "preferencesRequireIdpSession": "Inicia sesión con tu proveedor de identidad para cambiar estas preferencias.",
+    "preferencesDelegationFailed": "No se pudo contactar con tu proveedor de identidad. Inténtalo de nuevo.",
+    "nameInvalid": "El nombre visible debe ser texto.",
+    "nameTooLong": "El nombre visible debe tener como máximo 255 caracteres.",
+    "passwordChanged": "¡Contraseña cambiada exitosamente!",
+    "userDeleted": "Usuario eliminado exitosamente.",
+    "findAll": {
+      "error": "Ocurrió un error al recuperar los usuarios."
+    },
+    "userNotFoundWithName": "Usuario {{username}} no encontrado.",
+    "findOne": {
+      "error": "Ocurrió un error al recuperar el usuario."
+    },
+    "profile": {
+      "error": "Error al recuperar el perfil del usuario"
+    },
+    "checkOrgUsers": {
+      "error": "Ocurrió un error al verificar los usuarios de la organización."
+    },
+    "fetchOrgsError": "Error al obtener tus organizaciones",
+    "primaryOrgSet": "Organización principal establecida a {{orgName}}",
+    "setPrimaryOrgError": "Error al establecer la organización principal",
+    "update": {
+      "error": "Ocurrió un error al actualizar el usuario."
+    }
+  },
+  "invitations": {
+    "notFound": "Invitación no encontrada.",
+    "deleted": "Invitación eliminada exitosamente.",
+    "delete": {
+      "error": "Ocurrió un error al eliminar la invitación."
+    },
+    "get": {
+      "error": "Ocurrió un error al recuperar las invitaciones activas."
+    },
+    "invalidRole": "Rol inválido. Las invitaciones solo pueden asignar roles de miembro, administrador o invitado.",
+    "adminInviteRequiresOwner": "Solo los propietarios de la organización pueden invitar administradores.",
+    "requiresIdpAccount": "Esta organización es administrada por tu proveedor de identidad; inicia sesión a través de él para administrar sus invitaciones.",
+    "sent": "¡Invitación enviada exitosamente!",
+    "send": {
+      "error": "Ocurrió un error al enviar la invitación.",
+      "externalError": "El proveedor de identidad no pudo enviar la invitación. Es seguro intentarlo de nuevo: reenviar reemplaza la invitación pendiente para esa dirección."
+    },
+    "invalidOrExpired": "Token de invitación inválido o caducado.",
+    "tokenRequired": "Se requiere el token de invitación.",
+    "valid": "El token de invitación es válido.",
+    "validate": {
+      "error": "Ocurrió un error al validar el token de invitación."
+    },
+    "accepted": "Te has unido a {{organization}}.",
+    "emailMismatch": "Esta invitación fue enviada a {{email}}. Por favor inicia sesión con esa cuenta para aceptarla.",
+    "accept": {
+      "error": "Ocurrió un error al aceptar la invitación."
+    }
+  },
+  "notifications": {
+    "versionCreated": {
+      "title": "Nueva versión de {{organization}}/{{box}}",
+      "body": "Se publicó la versión {{version}}."
+    },
+    "versionDeprecated": {
+      "title": "Versión obsoleta: {{organization}}/{{box}} {{version}}"
+    },
+    "isoPublished": {
+      "title": "ISO publicada: {{organization}}/{{iso}}",
+      "body": "{{iso}} ya está disponible."
+    },
+    "downloadPublished": {
+      "title": "Descarga publicada: {{organization}}/{{download}}",
+      "body": "{{download}} ya está disponible."
+    },
+    "serviceAccountExpiry": {
+      "title": "Cuenta de servicio por caducar: {{username}}",
+      "bodyOne": "Caduca en 1 día. Vuelve a crearla antes de que se rompa la automatización.",
+      "bodyOther": "Caduca en {{days}} días. Vuelve a crearla antes de que se rompa la automatización."
+    },
+    "sslExpiry": {
+      "title": "El certificado SSL de Hyperweaver Server está por caducar",
+      "bodyOne": "El certificado caduca en 1 día ({{expiry}}).",
+      "bodyOther": "El certificado caduca en {{days}} días ({{expiry}})."
+    },
+    "test": {
+      "title": "Prueba de Hyperweaver Server",
+      "body": "Una notificación de prueba de Hyperweaver Server."
+    },
+    "pushNotConfigured": "Las notificaciones push no están configuradas."
+  },
+  "mail": {
+    "testEmailSent": "Correo de prueba enviado exitosamente",
+    "errorSendingEmail": "Error al enviar correo de prueba",
+    "testEmailSubject": "Correo de Prueba SMTP",
+    "testEmailBody": "Este es un correo de prueba para verificar la configuración SMTP.",
+    "invitationSubject": "Invitación a Organización Hyperweaver Server para {{organizationName}}",
+    "invitationTitle": "Invitación para unirse a la Organización Hyperweaver Server: {{organizationName}}",
+    "invitationBody": "Por favor haz clic en el enlace de abajo para unirte a la organización:",
+    "invitationButton": "Unirse a la Organización",
+    "invitationExpiry": "Este enlace de invitación caducará el: {{expirationDate}}",
+    "verificationSubject": "Verificación de Correo Electrónico Hyperweaver Server",
+    "verificationTitle": "Bienvenido a Hyperweaver Server",
+    "verificationBody": "Por favor haz clic en el enlace de abajo para verificar tu correo electrónico:",
+    "verificationButton": "Verificar Correo",
+    "verificationExpiry": "Este enlace de verificación caducará el: {{expirationDate}}"
+  },
+  "errors": {
+    "operationFailed": "Operación fallida."
+  },
+  "serviceAccounts": {
+    "membershipRequired": "¡Debes ser miembro de esta organización para crear cuentas de servicio!",
+    "deleted": "Cuenta de servicio eliminada exitosamente.",
+    "notFound": "Cuenta de servicio no encontrada."
+  },
+  "search": {
+    "queryTooShort": "La búsqueda debe tener al menos 2 caracteres.",
+    "error": "Ocurrió un error al buscar."
+  },
+  "config": {
+    "gravatarNotFound": "Configuración de Gravatar no encontrada.",
+    "ticketSystemNotConfigured": "Sistema de tickets no configurado."
+  },
+  "updates": {
+    "notAptManaged": "Hyperweaver Server no se instaló desde su repositorio APT en este servidor, así que no puede actualizarse por sí mismo.",
+    "devPackage": "Este servidor ejecuta boxvault-dev, que se actualiza a mano; solo el paquete boxvault se actualiza por sí mismo.",
+    "upToDate": "Hyperweaver Server {{version}} ya es la versión más reciente.",
+    "watchInactive": "La unidad boxvault-update.path no está activa en este servidor, así que no se puede aplicar la actualización.",
+    "launchFailed": "No se pudo iniciar la actualización.",
+    "launched": "Actualizando a {{version}}; el servicio se reinicia cuando termina la actualización."
+  },
+  "favorites": {
+    "oidcRequired": "Se requiere autenticación OIDC para gestionar favoritos",
+    "saved": "Favoritos guardados exitosamente",
+    "saveError": "Error al guardar favoritos"
+  },
+  "files": {
+    "invalidDownloadToken": "Token de descarga inválido.",
+    "noDownloadToken": "No se proporcionó token de descarga.",
+    "download": {
+      "error": "No se pudo descargar el archivo. {{error}}",
+      "streamError": "No se pudo crear el flujo de archivo: {{error}}",
+      "unauthorized": "Acceso no autorizado a la descarga de archivo.",
+      "genericError": "Ocurrió un error al descargar el archivo."
+    },
+    "notFound": "Archivo no encontrado.",
+    "info": {
+      "unauthorized": "Acceso no autorizado a la información del archivo.",
+      "error": "Ocurrió un error al recuperar la información del archivo."
+    },
+    "unauthorized": "Acceso no autorizado al archivo.",
+    "link": {
+      "error": "Ocurrió un error al generar el enlace de descarga."
+    },
+    "delete": {
+      "permissionDenied": "Solo puedes eliminar archivos de Boxes que posees, o necesitas rol de administrador/propietario.",
+      "partialError": "Intento de eliminación de archivo, pero se encontraron problemas con la base de datos o limpieza de directorio.",
+      "error": "Ocurrió un error al eliminar el archivo."
+    },
+    "deleted": "Archivo y registro de base de datos eliminados, o archivo no encontrado pero limpieza intentada.",
+    "update": {
+      "permissionDenied": "Solo puedes actualizar archivos de Boxes que posees, o necesitas rol de administrador/propietario.",
+      "error": "No se pudo actualizar el archivo: {{file}}"
+    },
+    "notFoundUploadFirst": "Archivo no encontrado. Por favor sube el archivo primero.",
+    "noFileUploaded": "No se subió ningún archivo",
+    "invalidFileName": "Nombre de archivo inválido. Solo se permiten letras, dígitos, punto, guion y guion bajo.",
+    "updated": "Archivo actualizado exitosamente",
+    "fileTooLarge": "¡El tamaño del archivo no puede ser mayor a {{size}}GB!",
+    "uploadTimeout": "Tiempo de espera de carga agotado - La solicitud tardó demasiado en completarse",
+    "noStorageSpace": "No hay suficiente espacio de almacenamiento disponible",
+    "pathVerificationError": "Ocurrió un error al verificar la ruta del archivo.",
+    "upload": {
+      "permissionDenied": "Solo puedes subir archivos para Boxes que posees, o necesitas rol de administrador/propietario.",
+      "error": "No se pudo subir el archivo",
+      "completed": "Carga de archivo completada",
+      "updated": "Archivo actualizado exitosamente",
+      "chunkCompleted": "Carga de fragmento completada"
+    }
+  },
+  "health": {
+    "checkFailed": "Verificación de salud fallida"
+  },
+  "isos": {
+    "notFound": "ISO no encontrada.",
+    "notFoundWithName": "ISO {{name}} no encontrada en la organización {{organization}}.",
+    "invalidName": "Nombre de ISO inválido. Solo debe contener mayúsculas, minúsculas, dígitos, guion y punto.",
+    "invalidNameDots": "Nombre de ISO inválido. No debe contener puntos consecutivos.",
+    "duplicateName": "Ya existe una ISO con el nombre {{name}} en la organización {{organization}}.",
+    "invalidArchitecture": "Arquitectura inválida. Solo debe contener caracteres alfanuméricos, guiones, guiones bajos y puntos, y no debe comenzar con guion ni punto.",
+    "deleted": "ISO eliminada exitosamente.",
+    "versions": {
+      "notFound": "Versión de ISO no encontrada.",
+      "duplicate": "Ya existe una versión con el número {{versionNumber}} para la ISO {{name}}.",
+      "deleted": "¡Versión de ISO eliminada exitosamente!",
+      "invalidReleaseNotes": "releaseNotes debe ser una cadena de texto.",
+      "invalidDeprecated": "deprecated debe ser un booleano.",
+      "invalidDeprecationReason": "deprecationReason debe ser una cadena de texto de como máximo 512 caracteres."
+    },
+    "watch": {
+      "error": "Ocurrió un error al actualizar el seguimiento de la ISO.",
+      "listError": "Ocurrió un error al recuperar las ISOs seguidas."
+    }
+  },
+  "downloads": {
+    "notFound": "Descarga no encontrada.",
+    "notFoundWithName": "Descarga {{name}} no encontrada en la organización {{organization}}.",
+    "deleted": "Descarga eliminada exitosamente.",
+    "permissionDenied": "Solo puedes cambiar descargas que posees, o necesitas rol de administrador/propietario.",
+    "releases": {
+      "notFound": "Versión no encontrada.",
+      "deleted": "¡Versión eliminada exitosamente!"
+    },
+    "patches": {
+      "notFound": "Parche no encontrado.",
+      "deleted": "¡Parche eliminado exitosamente!"
+    },
+    "families": {
+      "notFound": "Familia no encontrada.",
+      "deleted": "Familia eliminada exitosamente.",
+      "permissionDenied": "Necesitas una membresía con escritura en la organización para cambiar sus familias."
+    },
+    "watch": {
+      "error": "Ocurrió un error al actualizar el seguimiento de la descarga.",
+      "listError": "Ocurrió un error al recuperar las descargas seguidas."
+    }
+  },
+  "requests": {
+    "invalidRole": "Rol inválido. Debe ser miembro, administrador o invitado.",
+    "notFound": "¡Solicitud de unión no encontrada!",
+    "alreadyProcessed": "¡La solicitud ya ha sido procesada!",
+    "approved": "¡Solicitud de unión aprobada exitosamente!",
+    "approvedDelegated": "Solicitud aprobada — se envió una invitación a través del proveedor de identidad; la membresía se completa cuando el usuario la acepte allí.",
+    "approve": {
+      "error": "Error al aprobar la solicitud de unión",
+      "externalError": "No se pudo crear la invitación en el proveedor de identidad. Por favor intenta de nuevo."
+    },
+    "notFoundOrNotCancellable": "¡Solicitud de unión no encontrada o no se puede cancelar!",
+    "cancelled": "¡Solicitud de unión cancelada exitosamente!",
+    "cancel": {
+      "error": "Error al cancelar la solicitud de unión"
+    },
+    "organizationNotFound": "¡Organización no encontrada!",
+    "joinRequestsNotAllowed": "¡La organización no permite solicitudes de unión!",
+    "alreadyMember": "¡Ya eres miembro de esta organización!",
+    "alreadyPending": "¡Ya tienes una solicitud pendiente para esta organización!",
+    "submitted": "¡Solicitud de unión enviada exitosamente!",
+    "create": {
+      "error": "Error al crear la solicitud de unión"
+    },
+    "denied": "Solicitud de unión denegada.",
+    "deny": {
+      "error": "Error al denegar la solicitud de unión"
+    },
+    "fetchOrg": {
+      "error": "Error al obtener las solicitudes de unión"
+    },
+    "fetchUser": {
+      "error": "Error al obtener tus solicitudes de unión"
+    }
+  }
+}

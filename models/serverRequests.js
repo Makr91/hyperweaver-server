@@ -1,7 +1,7 @@
 import axios from 'axios';
 import https from 'https';
 import { log } from '../utils/Logger.js';
-import { loadConfig } from '../utils/config.js';
+import { loadConfig } from '../utils/config-loader.js';
 import { broadcast } from '../utils/events.js';
 
 /**
@@ -58,7 +58,7 @@ const resolveRequestTimeout = (options, isFileUpload) => {
   if (options.timeout) {
     return options.timeout;
   }
-  const config = loadConfig();
+  const config = loadConfig('app');
   if (isFileUpload) {
     return config.limits?.api_timeouts?.file_upload || 1800000;
   }
@@ -106,6 +106,31 @@ const toFailureResult = error => ({
 });
 
 /**
+ * The sentence of a failed key bootstrap: the agent's own reason when it
+ * answered, its auto-disabled refusal reworded to name the existing-key
+ * option, the unreachable agent, or the request's own failure.
+ * @param {Error} error - The axios failure
+ * @returns {string} The sentence
+ */
+const bootstrapFailureOf = error => {
+  if (error.response) {
+    const reason =
+      error.response.data?.detail ||
+      error.response.data?.message ||
+      error.response.data?.msg ||
+      error.response.statusText;
+    if (error.response.status === 403 && reason.includes('Bootstrap endpoint auto-disabled')) {
+      return 'Bootstrap endpoint has been auto-disabled after first use for security. Please use the "I have an existing API key" option instead.';
+    }
+    return `Agent error: ${reason}`;
+  }
+  if (error.code === 'ECONNREFUSED') {
+    return 'Cannot connect to the agent. Please check if it is running.';
+  }
+  return `Bootstrap failed: ${error.message}`;
+};
+
+/**
  * Attach the agent-HTTP request methods (instance + class) to the Server model.
  * @param {Object} Server - The defined servers model
  */
@@ -118,7 +143,7 @@ export const attachServerRequestMethods = Server => {
     const serverUrl = this.getServerUrl();
     try {
       const response = await axios.get(`${serverUrl}/api/status`, {
-        timeout: timeoutMs || loadConfig().agents.poll_timeout,
+        timeout: timeoutMs || loadConfig('app').agents.poll_timeout,
         httpsAgent: new https.Agent({
           rejectUnauthorized: !this.allow_insecure,
           keepAlive: false,
@@ -353,28 +378,7 @@ export const attachServerRequestMethods = Server => {
       }
       throw new Error('Invalid response from the agent');
     } catch (error) {
-      if (error.response) {
-        const errorMessage =
-          error.response.data?.message || error.response.data?.msg || error.response.statusText;
-
-        if (
-          error.response.status === 403 &&
-          errorMessage.includes('Bootstrap endpoint auto-disabled')
-        ) {
-          throw new Error(
-            'Bootstrap endpoint has been auto-disabled after first use for security. Please use the "I have an existing API key" option instead.',
-            { cause: error }
-          );
-        }
-
-        throw new Error(`Agent error: ${errorMessage}`, { cause: error });
-      } else if (error.code === 'ECONNREFUSED') {
-        throw new Error('Cannot connect to the agent. Please check if it is running.', {
-          cause: error,
-        });
-      } else {
-        throw new Error(`Bootstrap failed: ${error.message}`, { cause: error });
-      }
+      throw Object.assign(new Error(bootstrapFailureOf(error), { cause: error }), { status: 502 });
     }
   };
 };

@@ -2,8 +2,31 @@ import db from '../../models/index.js';
 import { log } from '../../utils/Logger.js';
 import { filterAndAnnotateServers } from '../../utils/orgVisibility.js';
 import { notifyServersUpdated } from '../../utils/agentRelay.js';
+import { getUserOrgAccess } from '../../utils/orgAccess.js';
+import { problem } from '../../utils/problem.js';
 
 const { server: ServerModel } = db;
+
+const ADD_FAILURES = { 409: 'conflict', 502: 'bad-gateway' };
+
+/**
+ * The visible rows with each agent's `api_key` added, for a global admin who
+ * asks with `includeApiKeys=true`; the rows unchanged for anyone else.
+ * @param {import('express').Request} req - The request
+ * @param {Array<Object>} rows - The visible registry rows as plain objects
+ * @returns {Promise<Array<Object>>} The rows
+ */
+const withApiKeys = async (req, rows) => {
+  if (req.query.includeApiKeys !== 'true' || !(await getUserOrgAccess(req)).bypass) {
+    return rows;
+  }
+  const keyed = await ServerModel.scope('withApiKey').findAll({
+    where: { id: rows.map(row => row.id) },
+    attributes: ['id', 'api_key'],
+  });
+  const keys = new Map(keyed.map(server => [server.id, server.api_key]));
+  return rows.map(row => ({ ...row, api_key: keys.get(row.id) || '' }));
+};
 
 /**
  * @swagger
@@ -46,7 +69,7 @@ const { server: ServerModel } = db;
  *               apiKey:
  *                 type: string
  *                 description: Existing agent API key (optional - will bootstrap if not provided)
- *                 example: "wh_abc123def456..."
+ *                 example: "hw_abc123def456.s3cr3t..."
  *               allowInsecure:
  *                 type: boolean
  *                 description: Accept self-signed TLS certificates from this agent
@@ -85,12 +108,24 @@ const { server: ServerModel } = db;
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
+ *       409:
+ *         description: An agent at that hostname, port and protocol is already registered
+ *         content:
+ *           application/problem+json:
+ *             schema:
+ *               $ref: '#/components/schemas/Problem'
  *       500:
  *         description: Internal server error
  *         content:
- *           application/json:
+ *           application/problem+json:
  *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
+ *               $ref: '#/components/schemas/Problem'
+ *       502:
+ *         description: The agent refused the key bootstrap or the pasted key, or could not be reached; title carries the agent's reason
+ *         content:
+ *           application/problem+json:
+ *             schema:
+ *               $ref: '#/components/schemas/Problem'
  */
 export const addServer = async (req, res) => {
   try {
@@ -122,7 +157,7 @@ export const addServer = async (req, res) => {
         hostname: server.hostname,
         port: server.port,
         protocol: server.protocol,
-        entityName: server.entity_name,
+        entity_name: server.entity_name,
         description: server.description,
       },
     });
@@ -132,9 +167,11 @@ export const addServer = async (req, res) => {
       hostname: req.body.hostname,
       port: req.body.port,
     });
-    return res.status(500).json({
-      success: false,
-      message: error.message || 'Failed to add server',
+    const type = ADD_FAILURES[error.status];
+    return problem(res, req, {
+      status: type ? error.status : 500,
+      type: type || 'internal',
+      title: error.message,
     });
   }
 };
@@ -144,10 +181,17 @@ export const addServer = async (req, res) => {
  * /api/servers:
  *   get:
  *     summary: Get all registered agents
- *     description: Retrieve list of all registered host agents
+ *     description: Retrieve list of all registered host agents. With includeApiKeys=true a global admin's rows carry each agent's api_key.
  *     tags: [Server Management]
  *     security:
  *       - JwtAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: includeApiKeys
+ *         required: false
+ *         schema:
+ *           type: boolean
+ *         description: Add api_key to each row; honoured for a global admin only
  *     responses:
  *       200:
  *         description: Servers retrieved successfully
@@ -179,7 +223,7 @@ export const addServer = async (req, res) => {
 export const getAllServers = async (req, res) => {
   try {
     const servers = await ServerModel.getAllServers();
-    const visible = await filterAndAnnotateServers(req, servers);
+    const visible = await withApiKeys(req, await filterAndAnnotateServers(req, servers));
 
     return res.json({
       success: true,
@@ -287,7 +331,9 @@ export const testServer = async (req, res) => {
 
     return res.json({
       success: testResult.success,
-      message: testResult.success ? 'Connection successful' : 'Connection failed',
+      message: testResult.success
+        ? 'Connection successful'
+        : testResult.error || 'Connection failed',
       error: testResult.error || null,
       serverInfo: testResult.success ? testResult.data : null,
     });

@@ -1,10 +1,11 @@
 import { Router } from 'express';
-import { authenticate } from '../auth/auth.js';
-import { oidcTokenRefresh } from '../auth/oidcTokenRefresh.js';
+import { authJwt, oidcTokenRefresh } from '../middleware/index.js';
 import { apiLimiter } from '../middleware/rateLimiter.js';
+import { authorizationCredential } from '../utils/requestAuth.js';
 import { openEventStream } from '../utils/events.js';
 import { relayNotifications } from '../utils/notificationRelay.js';
 import { ensureAgentRelays } from '../utils/agentRelay.js';
+import { problem } from '../utils/problem.js';
 
 const router = Router();
 
@@ -13,6 +14,17 @@ router.use((req, res, next) => {
   res.header('Access-Control-Allow-Headers', 'x-access-token, Origin, Content-Type, Accept');
   next();
 });
+
+const requireCredential = (req, res, next) => {
+  if (!req.headers['x-access-token'] && !authorizationCredential(req)) {
+    return problem(res, req, {
+      status: 401,
+      type: 'authentication',
+      title: req.__('auth.unauthorized'),
+    });
+  }
+  return next();
+};
 
 const openStream = (req, res) => {
   openEventStream(req, res);
@@ -58,6 +70,14 @@ const openStream = (req, res) => {
  *       403:
  *         description: The caller may not read the stream
  */
-router.get('/events', apiLimiter, authenticate, oidcTokenRefresh, openStream);
+router.get(
+  '/events',
+  apiLimiter,
+  requireCredential,
+  oidcTokenRefresh,
+  authJwt.verifyToken,
+  authJwt.isUser,
+  openStream
+);
 
 export default router;

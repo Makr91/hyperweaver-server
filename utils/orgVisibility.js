@@ -14,15 +14,13 @@ import {
 
 const { serverOrg: ServerOrgModel, machineOrg: MachineOrgModel } = db;
 
-const isLocalPrivileged = req => req.user?.role === 'admin' || req.user?.role === 'super-admin';
-
 /**
- * Filter the registry list to the agents this user may SEE (unassigned agents are open
- * to all; owned agents require org membership or a machine sticker on that agent) and
- * annotate every visible row with `org_uuids` (the agent's owning orgs, `[]` =
- * unassigned/open). Privacy: local admins/super-admins get the full owning-org list;
- * everyone else sees only the intersection with their OWN orgs — foreign org uuids on
- * shared hosts never leak (D15).
+ * Filter the registry list to the agents this user may SEE (org membership on the agent
+ * or a machine sticker on that agent; an agent no org owns is seen by a global admin
+ * alone) and annotate every visible row with `org_uuids` (the agent's owning orgs, `[]` =
+ * unassigned). Privacy: a global admin and an owner or admin of any organization
+ * get the full owning-org list; everyone else sees only the intersection with their OWN
+ * orgs — foreign org uuids on shared hosts never leak (D15).
  * @param {import('express').Request} req
  * @param {Array<Object>} servers - servers rows
  * @returns {Promise<Array<Object>>} Visible subset as plain objects with org_uuids
@@ -54,7 +52,7 @@ export const filterAndAnnotateServers = async (req, servers) => {
       : servers.filter(server => {
           const owners = ownedServers.get(server.id);
           if (!owners) {
-            return true;
+            return machineVisible.has(server.id);
           }
           if (machineVisible.has(server.id)) {
             return true;
@@ -62,7 +60,7 @@ export const filterAndAnnotateServers = async (req, servers) => {
           return orgUuids.some(uuid => owners.has(uuid));
         });
 
-  const fullLists = userAccess.bypass || isLocalPrivileged(req);
+  const fullLists = userAccess.privileged;
   return visible.map(server => {
     const owners = [...(ownedServers.get(server.id) ?? [])];
     return {
@@ -75,7 +73,8 @@ export const filterAndAnnotateServers = async (req, servers) => {
 /**
  * Decorate a proxied GET machines list with each machine's `org_uuids` from
  * machine_orgs (`[]` = unassigned). Same privacy rule as the registry annotation:
- * full lists for local admins/super-admins, caller's-orgs intersection otherwise.
+ * full lists for a global admin and an owner or admin of any organization,
+ * caller's-orgs intersection otherwise.
  * @param {import('express').Request} req
  * @param {number} serverId
  * @param {*} data - Agent machines-list response body ({machines, total} or array)
@@ -91,7 +90,7 @@ export const decorateMachinesResponse = async (req, serverId, data) => {
     byMachine.get(row.machine_name).push(row.org_uuid);
   }
 
-  const fullLists = isLocalPrivileged(req);
+  const fullLists = (await getUserOrgAccess(req)).privileged;
   const userOrgs = req.orgAccess?.userOrgs ?? new Map();
   const decorate = item => {
     const name = machineIdentifier(item);
@@ -112,17 +111,13 @@ export const decorateMachinesResponse = async (req, serverId, data) => {
 };
 
 /**
- * May this user manage org assignment on an agent? Local admins/super-admins always;
- * otherwise OWNER/ADMIN of an org that owns the agent (self-service, D15). Unassigned
- * agents are claimable only by local admins.
+ * May this user manage org assignment on an agent? A global admin always; otherwise an
+ * owner or admin of an organization that owns the agent.
  * @param {import('express').Request} req
  * @param {number} serverId
  * @returns {Promise<boolean>}
  */
 export const canManageAgentOrgs = async (req, serverId) => {
-  if (req.user?.role === 'admin' || req.user?.role === 'super-admin') {
-    return true;
-  }
   const access = await resolveAgentAccess(req, serverId);
   return access.level === 'full' && isManagerRole(access.role);
 };
@@ -130,16 +125,13 @@ export const canManageAgentOrgs = async (req, serverId) => {
 /**
  * May this user manage org assignment on a machine? Agent-org managers may assign ANY
  * machine on their agent (unstickered included); machine-org managers may re-assign
- * their own machine; local admins/super-admins always.
+ * their own machine; a global admin always.
  * @param {import('express').Request} req
  * @param {number} serverId
  * @param {string} machineName
  * @returns {Promise<boolean>}
  */
 export const canManageMachineOrgs = async (req, serverId, machineName) => {
-  if (req.user?.role === 'admin' || req.user?.role === 'super-admin') {
-    return true;
-  }
   const access = await resolveAgentAccess(req, serverId);
   if (access.level === 'full' && isManagerRole(access.role)) {
     return true;

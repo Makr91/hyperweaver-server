@@ -1,11 +1,12 @@
 import { Router } from 'express';
-import { authenticate } from '../auth/auth.js';
-import { oidcTokenRefresh } from '../auth/oidcTokenRefresh.js';
+import { authJwt, oidcTokenRefresh } from '../middleware/index.js';
 import { apiLimiter } from '../middleware/rateLimiter.js';
 import { getUserInfoClaims } from '../controllers/favorites/claims.js';
 import { getUserFavorites, saveUserFavorites } from '../controllers/favorites/user.js';
 
 const router = Router();
+
+// Apply rate limiting to this router
 
 router.use((req, res, next) => {
   void req;
@@ -13,10 +14,33 @@ router.use((req, res, next) => {
   next();
 });
 
-router.get('/user/favorites', apiLimiter, authenticate, oidcTokenRefresh, getUserFavorites);
+router.get(
+  '/user/favorites',
+  apiLimiter,
+  oidcTokenRefresh,
+  authJwt.verifyToken,
+  authJwt.isUser,
+  getUserFavorites
+);
 
-router.put('/user/favorites', apiLimiter, authenticate, oidcTokenRefresh, saveUserFavorites);
+router.put(
+  '/user/favorites',
+  apiLimiter,
+  oidcTokenRefresh,
+  authJwt.verifyToken,
+  authJwt.isUser,
+  saveUserFavorites
+);
 
-router.get('/userinfo/claims', apiLimiter, authenticate, oidcTokenRefresh, getUserInfoClaims);
+// Get enriched user claims (includes favorite_apps with metadata)
+// Apply OIDC token refresh middleware before this route as it uses OIDC access token
+router.get(
+  '/userinfo/claims',
+  apiLimiter,
+  oidcTokenRefresh,
+  authJwt.verifyToken,
+  authJwt.isUser,
+  getUserInfoClaims
+);
 
 export default router;

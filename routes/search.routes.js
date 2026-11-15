@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { authenticate } from '../auth/auth.js';
+import { authJwt } from '../middleware/index.js';
 import { apiLimiter } from '../middleware/rateLimiter.js';
 import { search } from '../controllers/search/search.js';
 
@@ -11,6 +11,6 @@ router.use((req, res, next) => {
   next();
 });
 
-router.get('/search', apiLimiter, authenticate, search);
+router.get('/search', apiLimiter, authJwt.verifyToken, authJwt.isUser, search);
 
 export default router;

@@ -4,15 +4,16 @@ import {
   resolveAgentAccess,
   filterProxyResponse,
   machineIdentifier,
+  isManagerRole,
 } from '../../utils/orgAccess.js';
 import { filterAndAnnotateServers } from '../../utils/orgVisibility.js';
 import { tokenClauses, matchedChain } from './scope.js';
 
-const { server: ServerModel, user: User, organization: Organization } = db;
+const { server: ServerModel, user: User, organization: Organization, UserOrg } = db;
 
 const HOST_FIELDS = ['entity_name', 'hostname', 'description'];
 const USER_FIELDS = ['username', 'email', 'name'];
-const ORGANIZATION_FIELDS = ['name', 'description', 'organization_code'];
+const ORGANIZATION_FIELDS = ['name', 'description', 'org_code'];
 
 /**
  * The chain entries of a row's own fields, in match priority order.
@@ -78,7 +79,7 @@ const findHosts = async ({ req, tokens }) => {
 };
 
 const machinesOf = async (req, server) => {
-  const agent = await ServerModel.withScope('withApiKey').findByPk(server.id);
+  const agent = await ServerModel.scope('withApiKey').findByPk(server.id);
   if (!agent?.api_key || !agent.isAgentRole()) {
     return [];
   }
@@ -130,34 +131,56 @@ const findMachines = async ({ req, tokens }) => {
   });
 };
 
-const findUsers = async ({ req, tokens, access, isAdmin }) => {
-  if (!isAdmin && req.user?.role !== 'admin') {
+const userRow = (user, organizationName, tokens) => {
+  const matched = matchedChain(own(user, USER_FIELDS), tokens);
+  if (!matched) {
     return [];
   }
-  const users = await User.findAll({
-    where: tokenClauses(USER_FIELDS, tokens),
-    include: [{ association: 'organization', attributes: ['name', 'org_uuid'] }],
-    order: [['username', 'ASC']],
+  return [
+    row({
+      kind: 'user',
+      id: user.username,
+      org: organizationName,
+      name: user.username,
+      title: user.username,
+      subtitle: organizationName,
+      matched,
+    }),
+  ];
+};
+
+const managedUuids = access =>
+  [...access.orgs.entries()].filter(([, role]) => isManagerRole(role)).map(([uuid]) => uuid);
+
+const findUsers = async ({ tokens, access, isAdmin }) => {
+  const where = tokenClauses(USER_FIELDS, tokens);
+  if (isAdmin) {
+    const users = await User.findAll({
+      where,
+      include: [{ model: Organization, as: 'primaryOrganization', attributes: ['name'] }],
+      order: [['username', 'ASC']],
+    });
+    return users.flatMap(user => userRow(user, user.primaryOrganization?.name || '', tokens));
+  }
+  const uuids = managedUuids(access);
+  if (uuids.length === 0) {
+    return [];
+  }
+  const memberships = await UserOrg.findAll({
+    include: [
+      { model: User, as: 'user', where, required: true },
+      {
+        model: Organization,
+        as: 'organization',
+        where: { uuid: uuids },
+        required: true,
+        attributes: ['name'],
+      },
+    ],
   });
-  const reachable = user => isAdmin || access.orgs.has(user.organization?.org_uuid);
-  return users.filter(reachable).flatMap(user => {
-    const matched = matchedChain(own(user, USER_FIELDS), tokens);
-    if (!matched) {
-      return [];
-    }
-    return [
-      row({
-        kind: 'user',
-        id: user.username,
-        org: user.organization?.name || '',
-        name: user.username,
-        title: user.username,
-        subtitle: joinParts(user.organization?.name, user.role),
-        facets: { role: user.role },
-        matched,
-      }),
-    ];
-  });
+  return memberships.flatMap(membership =>
+    userRow(membership.user, membership.organization.name, tokens)
+  );
 };
 
 const findOrganizations = async ({ tokens, access, isAdmin }) => {
@@ -165,7 +188,7 @@ const findOrganizations = async ({ tokens, access, isAdmin }) => {
     where: tokenClauses(ORGANIZATION_FIELDS, tokens),
     order: [['name', 'ASC']],
   });
-  const reachable = organization => isAdmin || access.orgs.has(organization.org_uuid);
+  const reachable = organization => isAdmin || access.orgs.has(organization.uuid);
   return organizations.filter(reachable).flatMap(organization => {
     const matched = matchedChain(own(organization, ORGANIZATION_FIELDS), tokens);
     if (!matched) {

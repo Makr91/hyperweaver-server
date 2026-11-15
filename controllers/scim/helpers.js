@@ -1,0 +1,322 @@
+// helpers.js — shared logic for the SCIM receiver controllers
+import { generateEmailHash } from '../../utils/identity.js';
+import { scimError } from '../../middleware/scimAuth.js';
+
+const SCIM_USER_EXTENSION = 'urn:startcloud:scim:schemas:extension:1.0:User';
+const SCIM_GROUP_EXTENSION = 'urn:startcloud:scim:schemas:extension:1.0:Group';
+const SCIM_USER_SCHEMA = 'urn:ietf:params:scim:schemas:core:2.0:User';
+const SCIM_GROUP_SCHEMA = 'urn:ietf:params:scim:schemas:core:2.0:Group';
+const SCIM_LIST_RESPONSE_SCHEMA = 'urn:ietf:params:scim:api:messages:2.0:ListResponse';
+
+const GROUP_ROLES = ['owner', 'admin', 'member', 'guest'];
+
+// Auth-server org roles ARE BoxVault's per-org role enum; precedence
+// resolves overlapping group membership (highest privilege wins).
+const GROUP_ROLE_PRECEDENCE = { owner: 3, admin: 2, member: 1, guest: 0 };
+
+/**
+ * Parse a SCIM Group externalId of the form `<org-uuid>:<owner|admin|member|guest>`
+ * (the auth server's identity for one role group).
+ * @param {string} externalId - The externalId value
+ * @returns {{orgUuid: string, role: string}|null} Parsed parts or null
+ */
+const parseGroupExternalId = externalId => {
+  if (typeof externalId !== 'string') {
+    return null;
+  }
+  const separator = externalId.lastIndexOf(':');
+  if (separator <= 0) {
+    return null;
+  }
+  const orgUuid = externalId.slice(0, separator);
+  const role = externalId.slice(separator + 1).toLowerCase();
+  if (!orgUuid || !GROUP_ROLES.includes(role)) {
+    return null;
+  }
+  return { orgUuid, role };
+};
+
+/**
+ * Parse a BoxVault-assigned SCIM resource id (a positive decimal integer
+ * serialized as a string).
+ * @param {string} rawId - The :id route parameter
+ * @returns {number|null} The numeric id, or null when it can never match
+ */
+const parseResourceId = rawId => (/^\d+$/.test(rawId) ? Number(rawId) : null);
+
+/**
+ * Parse the single supported SCIM filter clause: `externalId eq "<value>"`
+ * (RFC 7644 §3.4.2.2, restricted by contract to exactly this shape). The
+ * clause travels URL-encoded and Express has already decoded it here.
+ * @param {*} filter - Raw filter query parameter
+ * @returns {string|null} The quoted value, or null when unsupported
+ */
+const parseExternalIdFilter = filter => {
+  if (typeof filter !== 'string') {
+    return null;
+  }
+  const match = /^externalId eq "(?<value>[^"]*)"$/.exec(filter);
+  return match ? match.groups.value : null;
+};
+
+/**
+ * Send a SCIM resource or message body with the SCIM media type
+ * (application/scim+json, RFC 7644 §3.1).
+ * @param {Object} res - Express response
+ * @param {number} status - HTTP status code
+ * @param {Object} body - SCIM resource or message
+ * @returns {Object} The response
+ */
+const scimResponse = (res, status, body) =>
+  res.status(status).type('application/scim+json').json(body);
+
+/**
+ * Send a SCIM ListResponse (RFC 7644 §3.4.2) carrying the matched resources:
+ * totalResults is REQUIRED; Resources is REQUIRED when non-zero. The receiver
+ * supports no pagination: every response is the complete result (0 or 1
+ * resource by contract).
+ * @param {Object} res - Express response
+ * @param {Object[]} resources - Rendered SCIM resources
+ * @returns {Object} The response
+ */
+const scimListResponse = (res, resources) =>
+  scimResponse(res, 200, {
+    schemas: [SCIM_LIST_RESPONSE_SCHEMA],
+    totalResults: resources.length,
+    Resources: resources,
+  });
+
+/**
+ * Build the meta complex attribute (RFC 7643 §3.1): resourceType, created,
+ * lastModified (SCIM DateTime), and the resource URI as location.
+ * @param {string} resourceType - 'User' or 'Group'
+ * @param {Date|string} created - Row creation timestamp
+ * @param {Date|string} lastModified - Row update timestamp
+ * @param {string} location - Absolute resource URI
+ * @returns {Object}
+ */
+const scimMeta = (resourceType, created, lastModified, location) => ({
+  resourceType,
+  created: new Date(created).toISOString(),
+  lastModified: new Date(lastModified).toISOString(),
+  location,
+});
+
+/**
+ * Absolute URI of one SCIM resource, derived from the request (works for both
+ * the prod URL and dev test hosts; trust-proxy makes req.protocol accurate).
+ * Returned as meta.location and, on 201, the Location header (RFC 7644 §3.3).
+ * @param {Object} req - Express request (baseUrl is the /scim/v2 mount)
+ * @param {string} collection - '/Users' or '/Groups'
+ * @param {number|string} id - BoxVault-assigned resource id
+ * @returns {string}
+ */
+const resourceLocation = (req, collection, id) =>
+  `${req.protocol}://${req.get('host')}${req.baseUrl}${collection}/${id}`;
+
+// Nullable org-profile columns carried by the Group extension as plain strings.
+const ORG_PROFILE_STRING_KEYS = ['logo', 'url', 'telephone', 'locale', 'timezone'];
+
+// IdP-managed org settings: always present on the extension by contract, with
+// these defaults when missing or malformed.
+const ORG_ACCESS_MODES = ['private', 'invite', 'request'];
+const ORG_DEFAULT_ROLES = ['member', 'admin', 'guest'];
+
+/**
+ * Extract the org-profile keys from the urn:startcloud Group extension
+ * (schema.org/Organization names plus locale/timezone/address, and the
+ * IdP-managed accessMode/defaultRole settings). An absent optional key means
+ * "no value": email/description clear to their '' column defaults, the
+ * nullable columns clear to null. accessMode/defaultRole are always present
+ * by contract and fall back to their defaults (private/member) when not. The
+ * address object keeps the RFC 7643 §4.1.2 sub-attribute names verbatim
+ * (streetAddress newline-joined by the sender).
+ * @param {Object} extension - The urn:startcloud Group extension payload
+ * @returns {Object} Normalized profile (full desired state)
+ */
+const parseOrgProfile = extension => {
+  const profile = {
+    email: typeof extension.email === 'string' ? extension.email : '',
+    description: typeof extension.description === 'string' ? extension.description : '',
+    address:
+      extension.address &&
+      typeof extension.address === 'object' &&
+      !Array.isArray(extension.address)
+        ? extension.address
+        : null,
+    accessMode: ORG_ACCESS_MODES.includes(extension.accessMode) ? extension.accessMode : 'private',
+    defaultRole: ORG_DEFAULT_ROLES.includes(extension.defaultRole)
+      ? extension.defaultRole
+      : 'member',
+  };
+  for (const key of ORG_PROFILE_STRING_KEYS) {
+    profile[key] = typeof extension[key] === 'string' && extension[key] ? extension[key] : null;
+  }
+  return profile;
+};
+
+/**
+ * Apply the pushed org profile to the mirrored org (full desired state, so
+ * every field is applied; email also maintains emailHash). Lives here — NOT in
+ * utils/externalOrgs.js — because the login-claim sync shares that upsert and
+ * carries no profile keys; clear-on-absent there would wipe org profiles on
+ * every login.
+ * @param {Object} org - Mirrored organization instance
+ * @param {Object} profile - Normalized profile from parseOrgProfile
+ * @param {Object} transaction - Active transaction
+ * @returns {Promise<void>}
+ */
+const applyOrgProfile = async (org, profile, transaction) => {
+  const patch = {};
+  if (org.email !== profile.email) {
+    patch.email = profile.email;
+    patch.emailHash = profile.email ? generateEmailHash(profile.email) : '';
+  }
+  if (org.description !== profile.description) {
+    patch.description = profile.description;
+  }
+  for (const key of ORG_PROFILE_STRING_KEYS) {
+    if (org[key] !== profile[key]) {
+      patch[key] = profile[key];
+    }
+  }
+  if (JSON.stringify(org.address || null) !== JSON.stringify(profile.address)) {
+    patch.address = profile.address;
+  }
+  if (org.access_mode !== profile.accessMode) {
+    patch.access_mode = profile.accessMode;
+  }
+  if (org.default_role !== profile.defaultRole) {
+    patch.default_role = profile.defaultRole;
+  }
+  if (Object.keys(patch).length) {
+    await org.update(patch, { transaction });
+  }
+};
+
+/**
+ * Recompute a mirrored org's memberships from ALL stored role groups of its
+ * org_uuid, whichever issuer face pushed them. Per user: highest role across
+ * groups wins (owner>admin>member>guest). Users absent from every group lose
+ * their membership. Member UUIDs that match no known BoxVault user are ignored
+ * (ghost members, per contract).
+ * @param {Object} db - Database models
+ * @param {Object} org - Mirrored organization instance
+ * @param {string} orgUuid - Auth-server org UUID
+ * @param {Object} transaction - Active transaction
+ * @returns {Promise<number[]>} The ids of the users whose membership changed
+ */
+const recomputeOrgMemberships = async (db, org, orgUuid, transaction) => {
+  const { scimGroup: ScimGroup, credential: Credential, user: User, UserOrg } = db;
+
+  const groups = await ScimGroup.findByOrg(orgUuid, transaction);
+
+  // uuid -> winning auth-server role, with the issuer face that pushed it
+  const winningRoles = new Map();
+  for (const group of groups) {
+    const members = Array.isArray(group.members) ? group.members : [];
+    for (const memberUuid of members) {
+      const current = winningRoles.get(memberUuid);
+      if (!current || GROUP_ROLE_PRECEDENCE[group.role] > GROUP_ROLE_PRECEDENCE[current.role]) {
+        winningRoles.set(memberUuid, { role: group.role, issuer: group.issuer });
+      }
+    }
+  }
+
+  // Resolve UUIDs to BoxVault users; unknown UUIDs are ghosts and ignored.
+  // Credentials are issuer-scoped (#30); findByIssuerAndSubject also claims
+  // pre-issuer rows stored under the flat 'oidc' value.
+  const resolved = await Promise.all(
+    [...winningRoles].map(([memberUuid, winner]) =>
+      Credential.findByIssuerAndSubject(winner.issuer, memberUuid, transaction).then(credential =>
+        credential ? [credential.user_id, winner.role] : null
+      )
+    )
+  );
+  const desired = new Map(resolved.filter(Boolean)); // user_id -> BoxVault org role
+
+  const existing = await UserOrg.findAll({
+    where: { organization_id: org.id },
+    transaction,
+  });
+  const existingByUserId = new Map(existing.map(m => [m.user_id, m]));
+
+  const applyMembership = async ([userId, role]) => {
+    const membership = existingByUserId.get(userId);
+    if (membership) {
+      if (membership.role === role) {
+        return null;
+      }
+      await membership.update({ role }, { transaction });
+      return userId;
+    }
+    const user = await User.findByPk(userId, { transaction });
+    await UserOrg.create(
+      {
+        user_id: userId,
+        organization_id: org.id,
+        role,
+        is_primary: !!user && user.primary_organization_id === org.id,
+      },
+      { transaction }
+    );
+    return userId;
+  };
+  const applied = await [...desired].reduce(
+    (chain, entry) => chain.then(done => applyMembership(entry).then(result => [...done, result])),
+    Promise.resolve([])
+  );
+  const changed = applied.filter(userId => userId !== null);
+
+  const staleUserIds = existing.filter(m => !desired.has(m.user_id)).map(m => m.user_id);
+  if (staleUserIds.length) {
+    await UserOrg.destroy({
+      where: {
+        organization_id: org.id,
+        user_id: { [db.Sequelize.Op.in]: staleUserIds },
+      },
+      transaction,
+    });
+  }
+  return [...changed, ...staleUserIds];
+};
+
+/**
+ * Delete a mirrored org following the existing org-deletion semantics
+ * (organization/delete.js): destroy the row inside the caller's transaction.
+ * The returned callback runs after commit and does nothing.
+ * @param {Object} db - Database models
+ * @param {Object} org - Organization instance
+ * @param {Object} transaction - Active transaction
+ * @returns {Promise<{ memberIds: number[], cleanup: Function }>} The members the org had, and the post-commit cleanup callback
+ */
+const destroyMirrorOrg = async (db, org, transaction) => {
+  const members = await db.UserOrg.findAll({
+    where: { organization_id: org.id },
+    attributes: ['user_id'],
+    transaction,
+  });
+  const memberIds = members.map(member => member.user_id);
+  await org.destroy({ transaction });
+  const cleanup = () => undefined;
+  return { memberIds, cleanup };
+};
+
+export {
+  SCIM_USER_EXTENSION,
+  SCIM_GROUP_EXTENSION,
+  SCIM_USER_SCHEMA,
+  SCIM_GROUP_SCHEMA,
+  scimError,
+  scimResponse,
+  scimListResponse,
+  scimMeta,
+  resourceLocation,
+  parseGroupExternalId,
+  parseResourceId,
+  parseExternalIdFilter,
+  parseOrgProfile,
+  applyOrgProfile,
+  recomputeOrgMemberships,
+  destroyMirrorOrg,
+};

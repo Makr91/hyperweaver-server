@@ -30,13 +30,14 @@ const STATUS = {
     logo_url: '/brand/hyperweaver/mark.svg',
     repo: 'https://github.com/Makr91/hyperweaver-server',
     changelog: 'https://github.com/Makr91/hyperweaver-server/releases',
+    theme: { name: 'hyperweaver', css: '/themes/hyperweaver/hyperweaver.css' },
   },
   auth: ['backend'],
   collections: [],
   config: CONFIG_NAMES,
   events: { path: '/api/events', topics: EVENT_TOPICS },
   search: { path: '/api/search', kinds: ['host', 'machine', 'user', 'organization'] },
-  links: { docs: '/docs', contact: '', api: '/api-docs', community: [] },
+  links: { docs: '/docs', contact: '', api: '/api/docs', community: [] },
   ticket: null,
 };
 
@@ -63,11 +64,11 @@ const FEATURES = [
 /**
  * The feature tokens this host lists: the fixed set, `local-accounts`
  * while local sign-in is on.
- * @param {Object} authentication - The auth file's `authentication` section
+ * @param {Object} jwt - The auth file's `auth.jwt` section
  * @returns {string[]} The tokens
  */
-const featuresOf = authentication =>
-  authentication.local_enabled === false ? FEATURES : ['local-accounts', ...FEATURES];
+const featuresOf = jwt =>
+  jwt.local_enabled === false ? FEATURES : ['local-accounts', ...FEATURES];
 
 /**
  * Server status controller
@@ -102,6 +103,11 @@ class StatusController {
    *                     logo_url: { type: string, example: /brand/hyperweaver/mark.svg }
    *                     repo: { type: string }
    *                     changelog: { type: string }
+   *                     theme:
+   *                       type: object
+   *                       properties:
+   *                         name: { type: string, example: hyperweaver }
+   *                         css: { type: string, example: /themes/hyperweaver/hyperweaver.css }
    *                 auth:
    *                   type: array
    *                   items: { type: string }
@@ -149,9 +155,9 @@ class StatusController {
   static getServerStatus(req, res) {
     void req;
     res.vary('Origin');
-    const { authentication } = loadConfig('auth');
+    const { jwt } = loadConfig('auth').auth;
     const { branding } = loadConfig('app');
-    const payload = { ...STATUS, features: featuresOf(authentication) };
+    const payload = { ...STATUS, features: featuresOf(jwt) };
     if (branding.public_datacenter_label) {
       payload.datacenter_label = branding.datacenter_label;
     }

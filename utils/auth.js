@@ -11,44 +11,39 @@ const { verify, sign } = jwt;
  * @returns {Promise<boolean>} True when a secret was written
  */
 const ensureJwtSecret = async () => {
-  const current = loadConfig('auth').authentication.jwt_secret;
+  const current = loadConfig('auth').auth.jwt.jwt_secret;
   if (typeof current === 'string' && current.trim() !== '') {
     return false;
   }
   await saveConfig(
     'auth',
-    { authentication: { jwt_secret: randomBytes(32).toString('hex') } },
+    { auth: { jwt: { jwt_secret: randomBytes(32).toString('hex') } } },
     'hyperweaver-server'
   );
-  log.app.info('Generated authentication.jwt_secret');
+  log.app.info('Generated auth.jwt.jwt_secret');
   return true;
 };
 
-/**
- * The issuer and audience claims stamped on every session JWT and enforced
- * on every verification of one.
- * @returns {{issuer: string, audience: string}} The claim options
- */
+// Issuer/audience claims stamped on every Hyperweaver Server-minted JWT and enforced on
+// every verification of our own tokens. Foreign OIDC access tokens are
+// validated separately (externalTokenAuth) with their own audience config.
 const getJwtClaimOptions = () => {
-  const { authentication } = loadConfig('auth');
+  const authConfig = loadConfig('auth');
   return {
-    issuer: authentication.jwt_issuer || 'hyperweaver-server',
-    audience: authentication.jwt_audience || 'hyperweaver-ui',
+    issuer: authConfig.auth.jwt.jwt_issuer || 'hyperweaver-server',
+    audience: authConfig.auth.jwt.jwt_audience || 'hyperweaver-server-api',
   };
 };
 
-/**
- * Verify a session JWT: the signature, the issuer and the audience.
- * @param {string} token - The JWT
- * @param {Object} [options] - Extra verify options
- * @returns {Promise<Object>} The decoded claims
- */
+// Single implementation of Hyperweaver Server JWT verification (signature + issuer/audience).
+// Every consumer of our own tokens (sessionAuth middleware, download tokens)
+// decodes through here. Rejects on any verification failure.
 const verifySessionToken = (token, options = {}) => {
-  const { authentication } = loadConfig('auth');
+  const authConfig = loadConfig('auth');
   return new Promise((resolve, reject) => {
     verify(
       token,
-      authentication.jwt_secret,
+      authConfig.auth.jwt.jwt_secret,
       { ...getJwtClaimOptions(), ...options },
       (err, decodedToken) => {
         if (err) {
@@ -61,18 +56,34 @@ const verifySessionToken = (token, options = {}) => {
   });
 };
 
-/**
- * Sign a session JWT with the configured secret, issuer, audience and expiry.
- * @param {Object} payload - The claims
- * @returns {string} The JWT
- */
-const signSessionToken = payload => {
-  const { authentication } = loadConfig('auth');
-  return sign(payload, authentication.jwt_secret, {
-    algorithm: 'HS256',
-    expiresIn: authentication.jwt_expiration,
+const verifyDownloadToken = async token => {
+  try {
+    const decoded = await verifySessionToken(token);
+
+    // Only tokens minted for downloads may be redeemed as download tokens
+    if (decoded.type !== 'download') {
+      throw new Error('Not a download token');
+    }
+
+    return decoded;
+  } catch (err) {
+    log.app.warn('Invalid download token:', err.message);
+    throw err;
+  }
+};
+
+const generateDownloadToken = (payload, expiresIn = '1h') => {
+  const authConfig = loadConfig('auth');
+  return sign({ ...payload, type: 'download' }, authConfig.auth.jwt.jwt_secret, {
+    expiresIn,
     ...getJwtClaimOptions(),
   });
 };
 
-export { ensureJwtSecret, verifySessionToken, signSessionToken, getJwtClaimOptions };
+export {
+  ensureJwtSecret,
+  verifySessionToken,
+  verifyDownloadToken,
+  generateDownloadToken,
+  getJwtClaimOptions,
+};

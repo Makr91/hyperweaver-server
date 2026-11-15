@@ -3,6 +3,8 @@ frontend:
   name: Hyperweaver
   frontend_url: https://localhost:3443
   trust_proxy: 1
+organizations:
+  org_code_seed: B00000
 branding:
   datacenter_label: Hyperweaver
   public_datacenter_label: true
@@ -71,11 +73,15 @@ rate_limiting:
   skip_failed_requests: false
 agents:
   poll_timeout: 5000
+updates:
+  repository_packages_url: https://debian.startcloud.com/dists/stable/main/binary-amd64/Packages
+  versioninfo_url: https://github.com/Makr91/hyperweaver-server/releases/latest/download/update-info.json
 integrations:
   boxvault:
     url: ''
-  gravatar:
-    api_key: ''
+gravatar:
+  base_url: https://api.gravatar.com/v3/profiles/
+  api_key: ''
 ticket_system:
   enabled: false
   base_url: ''

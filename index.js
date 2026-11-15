@@ -4,29 +4,36 @@ import http from 'http';
 import fs from 'fs';
 import { basename } from 'path';
 import crypto from 'crypto';
-import { setTimeout as delay } from 'timers/promises';
 import cors from 'cors';
 import axios from 'axios';
 import session from 'express-session';
-import SequelizeStore from './utils/SequelizeSessionStore.js';
-import { loadConfig, setupTokenGuard } from './utils/config-loader.js';
+import connectSessionSequelize from 'connect-session-sequelize';
+import lusca from 'lusca';
+import { loadConfig, setupTokenGuard, getSetupTokenPath } from './utils/config-loader.js';
 import { routes as configEngineRoutes } from './config/config-engine.js';
 import { exit, SERVICE_USER, UPLOAD_LIMIT } from './config/hyperweaver-server.js';
 import { ensureJwtSecret } from './utils/auth.js';
-import { staticFileLimiter } from './routes/limiters.js';
+import { spaLimiter } from './middleware/rateLimiter.js';
+import { authJwt } from './middleware/index.js';
+import { initializeStrategies } from './auth/passport.js';
 import authRoutes from './routes/auth.routes.js';
+import mailRoutes from './routes/mail.routes.js';
 import userRoutes from './routes/user.routes.js';
-import adminRoutes from './routes/admin.routes.js';
-import organizationsRoutes from './routes/organizations.routes.js';
+import accountRoutes from './routes/account.routes.js';
+import requestRoutes from './routes/request.routes.js';
+import organizationRoutes from './routes/organization.routes.js';
+import serviceAccountRoutes from './routes/service_account.routes.js';
+import systemRoutes from './routes/system.routes.js';
+import scimRoutes from './routes/scim.routes.js';
 import serversRoutes from './routes/servers.routes.js';
 import statusRoutes from './routes/status.routes.js';
 import healthRoutes from './routes/health.routes.js';
 import rulesRoutes from './routes/rules.routes.js';
 import clientErrorsRoutes from './routes/client_errors.routes.js';
 import configRoutes from './routes/config.routes.js';
-import { authenticate, requireSuperAdmin } from './auth/auth.js';
 import ServerController from './controllers/ServerController.js';
-import db from './models/index.js';
+import db, { initializeDatabase } from './models/index.js';
+import { upgradeSchema } from './models/schema.js';
 import { specs, swaggerUi } from './config/swagger.js';
 import { log, createRequestLogger, generateRequestId } from './utils/Logger.js';
 import { configAwareI18nMiddleware as i18nMiddleware } from './config/i18n.js';
@@ -43,7 +50,7 @@ import { csrfProtection } from './auth/csrfProtection.js';
 
 /**
  * Dark Swagger theme shared with the Hyperweaver UI + docs site (config/swagger-theme.css).
- * Read once at module load; injected as swagger-ui-express customCss on /api-docs and
+ * Read once at module load; injected as swagger-ui-express customCss on /api/docs and
  * on the selected-agent shell below.
  */
 const swaggerCustomCss = fs.readFileSync(
@@ -53,7 +60,7 @@ const swaggerCustomCss = fs.readFileSync(
 
 /**
  * Themed shell for the selected-agent API docs (/agent/api-docs). It loads swagger-ui's
- * assets from /api-docs (already served) and its spec from the same-origin relay, reading
+ * assets from /api/docs (already served) and its spec from the same-origin relay, reading
  * the selected host id from ?server= in the browser.
  */
 const agentApiDocsHtml = `<!DOCTYPE html>
@@ -62,12 +69,12 @@ const agentApiDocsHtml = `<!DOCTYPE html>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Agent API Documentation</title>
-<link rel="stylesheet" href="/api-docs/swagger-ui.css" />
+<link rel="stylesheet" href="/api/docs/swagger-ui.css" />
 <style>${swaggerCustomCss}</style>
 </head>
 <body>
 <div id="swagger-ui"></div>
-<script src="/api-docs/swagger-ui-bundle.js"></script>
+<script src="/api/docs/swagger-ui-bundle.js"></script>
 <script>
 window.onload = function () {
   var params = new URLSearchParams(window.location.search);
@@ -86,7 +93,8 @@ window.onload = function () {
 </body>
 </html>`;
 
-let passport;
+const SessionStore = connectSessionSequelize(session.Store);
+const { csrf } = lusca;
 
 process.on('uncaughtException', err => {
   log.app.error('Uncaught Exception', {
@@ -98,7 +106,6 @@ process.on('uncaughtException', err => {
 await ensureJwtSecret();
 
 const appConfig = loadConfig('app');
-const { jwt_secret: jwtSecret } = loadConfig('auth').authentication;
 
 const app = express();
 const { port } = appConfig.server;
@@ -123,11 +130,12 @@ app.use(cors(corsOptions));
 app.options('*splat', cors(corsOptions));
 app.use(i18nMiddleware);
 app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true }));
 
-app.get('/index.html', staticFileLimiter, uiIndex(404));
-app.get('/callback/index.html', staticFileLimiter, uiIndex(404));
-app.get('/manifest.json', staticFileLimiter, uiManifest);
-app.get('/opensearch.xml', staticFileLimiter, opensearch);
+app.get('/index.html', spaLimiter, uiIndex(404));
+app.get('/callback/index.html', spaLimiter, uiIndex(404));
+app.get('/manifest.json', spaLimiter, uiManifest);
+app.get('/opensearch.xml', spaLimiter, opensearch);
 
 app.use(
   express.static('./ui', {
@@ -140,77 +148,6 @@ app.use(
     },
   })
 );
-
-const UserModel = db.user;
-
-log.database.info('Sequelize models loaded and ready');
-
-const SessionStore = SequelizeStore(session.Store);
-const sessionStore = new SessionStore({
-  db: db.sequelize,
-  tableName: 'Sessions',
-  checkExpirationInterval: 15 * 60 * 1000,
-  expiration: 30 * 60 * 1000,
-});
-
-/**
- * Key separation: derive the session-cookie signing key from the JWT secret instead of
- * reusing it verbatim — one master secret in config, two independent per-purpose keys.
- */
-const sessionSecret = crypto
-  .createHash('sha256')
-  .update(`hyperweaver-session:${jwtSecret}`)
-  .digest('hex');
-
-app.use(
-  session({
-    secret: sessionSecret,
-    store: sessionStore,
-    name: 'hyperweaver-server.sid',
-    resave: false,
-    saveUninitialized: false,
-    rolling: true,
-    cookie: {
-      secure: appConfig.server.ssl_enabled,
-      httpOnly: true,
-      maxAge: 30 * 60 * 1000,
-      sameSite: 'lax',
-    },
-    ...(() => {
-      sessionStore
-        .sync()
-        .then(() => log.database.info('Session store synchronized'))
-        .catch(err => log.database.error('Session store sync failed', { error: err.message }));
-      return {};
-    })(),
-  })
-);
-
-log.app.info('Session middleware configured for OIDC support');
-
-(async () => {
-  try {
-    await delay(1000);
-
-    try {
-      await UserModel.findOne({ limit: 1 });
-      log.database.info('Database schema ready for authentication');
-    } catch {
-      log.database.info('Waiting for database migrations to complete...');
-      await delay(3000);
-    }
-
-    const passportModule = await import('./auth/passport.js');
-    passport = passportModule.default;
-
-    app.use(passport.initialize());
-    app.use(passport.session());
-    log.auth.info('Passport.js initialized with session support');
-  } catch (error) {
-    log.auth.error('Failed to initialize Passport', { error: error.message });
-    log.auth.warn('Authentication will fall back to JWT-only mode');
-  }
-})();
 
 app.use((req, res, next) => {
   req.requestId = generateRequestId();
@@ -229,34 +166,44 @@ app.use((req, res, next) => {
 
 app.use(csrfProtection);
 
+/**
+ * End the process once the setup write has answered 200, so the service
+ * manager starts it again on the written configuration with the database open.
+ * @param {import('express').Request} req - Express request
+ * @param {import('express').Response} res - Express response
+ * @param {import('express').NextFunction} next - Next handler
+ * @returns {void}
+ */
+const restartAfterSetup = (req, res, next) => {
+  void req;
+  res.on('finish', () => {
+    if (res.statusCode === 200) {
+      log.app.info('Setup complete; restarting on the written configuration');
+      exit();
+    }
+  });
+  next();
+};
+
+app.put('/api/setup', restartAfterSetup);
+app.use('/api', statusRoutes);
+app.use('/api', configRoutes);
 configEngineRoutes(
   app,
   {
-    admin: [authenticate, requireSuperAdmin],
+    admin: [authJwt.verifyToken, authJwt.isUser, authJwt.isAdmin],
     setup: [setupTokenGuard],
-    actor: req => Promise.resolve(req.user?.email || req.user?.username || ''),
+    actor: async req => {
+      const user = await db.user.findByPk(req.userId, { attributes: ['email'] });
+      return user.email;
+    },
     user: SERVICE_USER,
   },
   exit,
   UPLOAD_LIMIT
 );
 
-app.use('/api', authRoutes);
-app.use('/api', userRoutes);
-app.use('/api', adminRoutes);
-app.use('/api', organizationsRoutes);
-app.use('/api', serversRoutes);
-app.use('/api', statusRoutes);
-app.use('/api', healthRoutes);
-app.use('/api', rulesRoutes);
-app.use('/api', clientErrorsRoutes);
-app.use('/api', configRoutes);
-app.use('/api', eventsRoutes);
-app.use('/api', favoritesRoutes);
-app.use('/api', notificationRoutes);
-app.use('/api', searchRoutes);
-
-app.use('/docs', staticFileLimiter, (req, res) => {
+app.use('/docs', spaLimiter, (req, res) => {
   void req;
   res.status(503).json({
     error: 'Documentation not bundled in this build',
@@ -265,7 +212,7 @@ app.use('/docs', staticFileLimiter, (req, res) => {
   });
 });
 
-app.use('/api-docs', swaggerUi.serve, (req, res, next) => {
+app.use('/api/docs', swaggerUi.serve, (req, res, next) => {
   const { protocol } = req;
   const host = req.get('host');
   const dynamicSpecs = {
@@ -298,12 +245,12 @@ app.use('/api-docs', swaggerUi.serve, (req, res, next) => {
     customCss: swaggerCustomCss,
     customSiteTitle: 'Hyperweaver Server API Documentation',
     swaggerOptions: {
-      url: `${protocol}://${host}/api-docs/swagger.json`,
+      url: `${protocol}://${host}/api/docs/swagger.json`,
     },
   })(req, res, next);
 });
 
-app.get('/api-docs/swagger.json', (req, res) => {
+app.get('/api/docs/swagger.json', (req, res) => {
   const { protocol } = req;
   const host = req.get('host');
   const dynamicSpecs = {
@@ -322,7 +269,7 @@ app.get('/api-docs/swagger.json', (req, res) => {
 /**
  * Selected-agent API docs (Aggregated mode). The Hyperweaver UI's "Agent API" reference
  * opens /agent/api-docs?server={id}, where id is the host selected in the navbar. This
- * themed shell loads swagger-ui from /api-docs and its spec from the relay below.
+ * themed shell loads swagger-ui from /api/docs and its spec from the relay below.
  */
 app.get('/agent/api-docs', (req, res) => {
   void req;
@@ -378,9 +325,110 @@ app.get('/agent/api-docs/swagger.json', async (req, res) => {
   }
 });
 
-app.get('*splat', staticFileLimiter, uiIndex());
+const SEEDED_ROLES = [
+  { id: 1, name: 'user' },
+  { id: 3, name: 'admin' },
+];
 
-app.use(errorHandler);
+const seedRoles = () =>
+  SEEDED_ROLES.reduce(
+    (chain, role) =>
+      chain.then(() => db.role.findOrCreate({ where: { name: role.name }, defaults: role })),
+    Promise.resolve()
+  );
+
+const SAFE_METHODS = ['GET', 'HEAD', 'OPTIONS'];
+const CODE_AUTHENTICATED = ['/api/auth/oidc/exchange', '/api/auth/oidc/backchannel-logout'];
+const sessionCsrf = csrf();
+
+const oidcSessionCsrf = (req, res, next) => {
+  if (!req.path.startsWith('/api/auth/oidc') || SAFE_METHODS.includes(req.method)) {
+    return next();
+  }
+  if (req.headers['x-access-token'] || req.headers.authorization) {
+    return next();
+  }
+  if (CODE_AUTHENTICATED.includes(req.path)) {
+    return next();
+  }
+  return sessionCsrf(req, res, next);
+};
+
+const initializeApp = async () => {
+  const sessionStore = new SessionStore({
+    db: db.sequelize,
+    tableName: 'Sessions',
+    checkExpirationInterval: 15 * 60 * 1000,
+    expiration: 30 * 60 * 1000,
+  });
+
+  const sessionSecret = crypto
+    .createHash('sha256')
+    .update(`hyperweaver-session:${loadConfig('auth').auth.jwt.jwt_secret}`)
+    .digest('hex');
+
+  app.use(
+    session({
+      secret: sessionSecret,
+      store: sessionStore,
+      name: 'hyperweaver-server.sid',
+      resave: false,
+      saveUninitialized: false,
+      rolling: true,
+      cookie: {
+        secure: appConfig.server.ssl_enabled,
+        httpOnly: true,
+        maxAge: 30 * 60 * 1000,
+        sameSite: 'lax',
+      },
+    })
+  );
+
+  log.database.info('Database synced', await upgradeSchema(db.sequelize));
+  await sessionStore.sync();
+  await initializeStrategies();
+  app.use(oidcSessionCsrf);
+  await seedRoles();
+
+  app.use('/api', rulesRoutes);
+  app.use('/api', healthRoutes);
+  app.use('/api', authRoutes);
+  app.use('/api', mailRoutes);
+  app.use('/api', userRoutes);
+  app.use('/api', accountRoutes);
+  app.use('/api', requestRoutes);
+  app.use('/api', organizationRoutes);
+  app.use('/api', serviceAccountRoutes);
+  app.use('/api', serversRoutes);
+  app.use('/api', favoritesRoutes);
+  app.use('/api', notificationRoutes);
+  app.use('/api', eventsRoutes);
+  app.use('/api', systemRoutes);
+  app.use('/api', clientErrorsRoutes);
+  app.use('/api', searchRoutes);
+  app.use('/scim/v2', scimRoutes);
+
+  app.get('*splat', spaLimiter, uiIndex());
+  app.use(errorHandler);
+  log.app.info('Hyperweaver Server application initialized');
+};
+
+const startApplication = () =>
+  initializeDatabase()
+    .then(() => initializeApp())
+    .catch(error => {
+      log.app.error('Application start failed', { error: error.message, stack: error.stack });
+    });
+
+if (fs.existsSync(getSetupTokenPath())) {
+  log.app.info('Setup token present; serving the setup routes until the setup write', {
+    path: getSetupTokenPath(),
+  });
+  app.get('/', spaLimiter, uiIndex());
+  app.use(errorHandler);
+} else {
+  startApplication();
+}
 
 (async () => {
   if (appConfig.server.ssl_enabled) {
@@ -459,7 +507,7 @@ app.use(errorHandler);
     httpServer.listen(port, () => {
       log.app.info('HTTP Server started', {
         port,
-        apiDocs: `http://localhost:${port}/api-docs`,
+        apiDocs: `http://localhost:${port}/api/docs`,
       });
     });
   }

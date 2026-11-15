@@ -1,124 +1,101 @@
-# hyperweaver-server: serve startcloud-ui
+# hyperweaver-server: serve startcloud-ui the way BoxVault does
 
-Pillars: precedence (hyperweaver-agent and BoxVault already serve the shared UI), convergence (one shape across the family), DRY (cp BoxVault's Node files byte for byte, rename only), extend not invent (no new design; a gap is said, not filled). The measure of a change is the fewest edits to the project that keep every feature and meet every objective. One GO per change; the files a change touches are re-read in full before it is applied. Every commit subject is `fix:`.
+The server takes the shape the shared UI reads. Where the two differ, the server changes. Every feature the server has stays.
 
-Sources:
+Method: a file BoxVault has is copied from `../BoxVault/backend/app/` and then edited in place for names, imports and guards; nothing is written anew where a BoxVault file exists. Each copy is diffed against its source.
 
-- `G:\Projects\BoxVault\backend\app\` for every Node file copied
-- `G:\Projects\hyperweaver-agent\internal\server\` for the family topics and the status feature list
-- `G:\Projects\startcloud-ui\docs\guides\universal-*.md` for every wire shape
-- `G:\Projects\hyperweaver-server\notifications.md` for the open asks
+Rules that bind every step:
 
-Rules that bind every change:
-
-- OIDC tokens live in `req.session.oidc` only, never in the JWT; copied BoxVault code that reads `oidc_access_token` from the JWT is redirected to `favorites/helpers.js`'s `extractOidcAccessToken` and `getAuthServerUrl`
-- No timer: the agent health poller, BoxVault's health watch interval and the settings restart delay are not carried; the SSE heartbeat and the reconnect backoff stay
-- No file over 500 lines after a touch; a split is a mechanical move of whole units
+- No migration, shim or backwards-compatible code
+- No timer; the SSE heartbeat and the reconnect backoff stay
+- No comment is added to any file
+- Names are `snake_case`, except where a library requires otherwise
+- No file over 500 lines after a touch
 - Swagger stays inline at its handler
 - Every tunable is a key of a YAML file under `CONFIG_DIR`
+- Every commit subject is `fix:`
 
-## 1. UI artifact switches to startcloud-ui
+A section is deleted when its change is committed.
 
-- `package.json`: `hyperweaverUiVersion: 0.10.12` becomes `startcloudUiVersion: 0.57.0`; description says STARTcloud UI
-- `.github/workflows/prod-build.yml` and `dev-build.yml`: the fetch step reads `startcloudUiVersion` and pulls `https://github.com/STARTcloud/startcloud-ui/releases/download/v${UI_VERSION}/startcloud-ui-${UI_VERSION}.tar.gz` into `ui/`
-- `.github/workflows/dependency-bump.yml`: copied from BoxVault, `backend/package.json` becomes `package.json` on both lines
-- `.github/workflows/bump-ui-pin.yml`: deleted
+## 1. Packages
 
-## 2. Config engine
+- `package.json` gains `sequelize`, `sqlite3`, `mysql2`, `bcryptjs`, `connect-session-sequelize`, `lusca`, `semver` at BoxVault's versions
+- `@sequelize/*`, `bcrypt`, `ldapts`, `passport-jwt`, `passport-local`, `passport-oauth2` leave with the code that imports them, in section 7
 
-- Copy verbatim: `config/config-engine.js`, `utils/validation.js`, `utils/problem.js`, `utils/config-loader.js`, `config/migrations.js` (emptied to `[]`), `scripts/migrate-config.js`
-- Copy `config/boxvault.js` as `config/hyperweaver-server.js`: `CONFIG_NAMES = ['app', 'auth', 'db', 'mail']`, `SERVICE_USER = 'hyperweaver-server'`, `PRODUCTION_CONFIG_DIR = process.env.CONFIG_DIR || '/etc/hyperweaver-server'`, `DIRECTORY_POINTERS` `/logging/log_directory` and `/database/storage`, `SSL_POINTERS` `/server/ssl_cert_path` and `/server/ssl_key_path`, `reachable` on `/mail/smtp_host`
-- Write `config/schema/{app,auth,db,mail}.schema.yaml` from the current `packaging/config/production-config.yaml` metadata: each `type/description/section/subsection/min/max/enum/required/order` becomes the schema keyword of the same meaning, `value` becomes `default`, secrets gain `writeOnly`, listener and database keys gain `requiresRestart` with a `restartReason`
-  - app: `frontend`, `server`, `security`, `logging`, `limits`, `agents` (poll keys removed), `integrations`, `ticket_system`, `branding`
-  - auth: `authentication` with `jwt_secret`, local, ldap, `oidc_providers`, external provisioning
-  - db: `database`
-  - mail: `mail`
-- Write `packaging/config/{app,auth,db,mail}.config.yaml` seeds: `schemaVersion: 1`, every required key, placeholder values, no secret
-- Write `config/{app,auth,db,mail}.dev.config.yaml` for the development directory
-- `utils/config.js` becomes a re-export of `config-loader.js`; every `X?.value` read across `index.js`, `models/index.js`, `utils/loggerCore.js`, `auth/*`, `controllers/*`, `routes/limiters.js`, `utils/sslSetup.js`, `utils/csrfProtection.js` reads the plain value from `loadConfig('<name>')`
-- `index.js` boots through `config-loader.js` first, runs in setup mode while `setup.token` exists the way `server.js` does, mounts `configEngineRoutes(app, { admin, setup, actor, user }, exit, UPLOAD_LIMIT)`
-- `packaging/DEBIAN/systemd/hyperweaver-server.service`: `Environment=CONFIG_DIR=/etc/hyperweaver-server`, `ConfigurationDirectory=hyperweaver-server`, `ConfigurationDirectoryMode=0750`, `ReadWritePaths` gains `/etc/hyperweaver-server`; `CONFIG_PATH` and `NODE_ENV` lines removed
-- `packaging/DEBIAN/postinst`: BoxVault's shape; copies each seed only where absent, creates the empty `setup.token` on fresh install, runs `scripts/migrate-config.js` on upgrade (which flattens the old `{value}` tree into `app.config.yaml`; the migration list carries one entry that moves `authentication` to `auth.config.yaml`, `database` to `db.config.yaml`, `mail` to `mail.config.yaml`); the `.jwt-secret` sed and `chown -R /etc` lines removed
-- `utils/auth.js` copied for `ensureJwtSecret`, `getJwtClaimOptions`, `verifySessionToken`
-- `package.json` deps add `js-yaml`, `jose`, `i18n`
-- `.gitignore`: `/config.yaml` becomes `/config/local/`
+## 2. Models
 
-## 3. Problem bodies and i18n
+- Copy `models/index.js`, `schema.js`, `fold-case.js`, `user.model.js`, `role.model.js`, `organizations.model.js`, `user-org.model.js`, `invitation.model.js`, `credential.model.js`, `request.model.js`, `revoked-session.model.js`, `scim-group.model.js`, `service_account.model.js`; the box, ISO and download associations are trimmed
+- Copy `utils/wire.js`
+- `models/server.model.js`, `serverOrg.model.js`, `machineOrg.model.js` and `serverRequests.js` move to the same `(sequelize, Sequelize)` shape, their columns and methods unchanged
+- `users` keeps `default_domain`
 
-- Copy `config/i18n.js`, `config/locales/en.json`, `middleware/errorHandler.js`, `middleware/rateLimiter.js`
-- `index.js` mounts the i18n middleware after CORS and the error handler last
-- `routes/limiters.js` retires; routes use `apiLimiter`, `authLimiter`, `spaLimiter`
-- `app.config.yaml` gains the `rate_limiting` block BoxVault reads
+## 3. Config
 
-## 4. Session wire
+- Copy `config/schema/auth.schema.yaml`, `db.schema.yaml` and their seeds under `packaging/config/` and `config/*.dev.config.yaml`, with `utils/config-loader.js`; the keys become `auth.jwt`, `auth.local`, `auth.oidc`, `auth.external`, `database_type`, `sql`, `mysql_pool`
+- The password minimum is 15 in the schema and both seeds
+- The LDAP keys are absent
 
-- Copy `utils/jwks.js`, `utils/oidcProviders.js`, `utils/userOrgs.js`, `utils/profile.js`, `middleware/authJwt.js`, `utils/requestAuth.js` (service-account and DPoP branches removed; `x-access-token` session JWT and Authorization Bearer of a trusted issuer), `controllers/auth/signin.js`, `controllers/auth/token.js`, `controllers/auth/backchannelLogout.js`, `controllers/user/getuserprofile.js`, `controllers/user/preferences.js`, `auth/passport.js` (BoxVault's openid-client helpers; replaces `oidcStrategies.js` and `oidcLogout.js`)
-- `models/user.model.js` gains `preferred_language`, `preferred_mode`, `preferred_theme`, `preferred_motion`, `name`, `avatar_url`, `sessions_invalid_after` (renamed from `tokens_valid_after` by a migration in `DatabaseMigrations.js`); `models/revoked-session.model.js` copied
-- Routes: `POST /api/auth/signin`, `GET /api/auth/oidc/:provider`, `GET /api/auth/oidc/callback` (lands the browser on `/auth/callback?code=` with a single-use code), `POST /api/auth/oidc/exchange`, `POST /api/auth/refresh-token`, `POST /api/auth/oidc/logout`, `POST /api/auth/oidc/backchannel-logout`, `GET /api/auth/oidc/issuers`, `GET /api/user`, `PATCH /api/user/preferences`, `PATCH /api/user`; `POST /api/auth/login`, `GET /api/auth/verify`, `GET /api/auth/profile`, the `#token=` fragment and `/ui/login` redirects retire
-- `auth/auth.js` `authenticate` reads `x-access-token` first through `requestAuth`, Bearer second; `optionalAuth` likewise
-- `auth/oidcTokenRefresh.js` stays; `auth/externalUser.js` stays; `auth/ldapStrategy.js` stays, its login route answering the signin shape
+## 4. Auth and utils
 
-## 5. Status
+- Copy `auth/passport.js`, `auth/external-user-handler.js`, `utils/externalOrgs.js`, `externalInvites.js`, `userOrgs.js`, `requestAuth.js` whole, `serviceAccountAuth.js`, `oidcRefresh.js`, `orgMembership.js`, `identity.js`, `jwtUser.js`, `reservedSegments.js`, `auth.js`, `middleware/authJwt.js`, `verifyOrgAccess.js`, `verifySignUp.js`, `oidcTokenRefresh.js`, `scimAuth.js`, `rules/password-blocklist.json`
+- The session JWT carries `id_token`, `oidc_access_token`, `oidc_refresh_token` and `oidc_expires_at`
+- `orgMembership.js` and `verifyOrgAccess.js` lose their box, ISO and download rules
 
-- `controllers/StatusController.js` rewritten to BoxVault's `STATUS` constant shape: `role 'hyperweaver-server'`, `version`, `brand { name: 'Hyperweaver', logo_url: '/brand/hyperweaver/mark.svg', repo: 'https://github.com/Makr91/hyperweaver-server' }`, `auth ['backend']`, `collections []`, `config` from `CONFIG_NAMES`, `features ['local-accounts', 'setup', 'admin', 'update', 'org-console', 'invitations', 'favorites', 'notifications', 'inbox', 'health', 'footer', 'sidebar', 'search', 'events', 'rules', 'hosts', 'certs', 'tools']` with `local-accounts` dropped while `local_enabled` is false, `events { path: '/api/events', topics }`, `search { path: '/api/search', kinds: ['host', 'machine', 'user', 'organization'] }`, `links { docs: '/docs', contact: '', api: '/api-docs', community: [] }`, `ticket null`, `datacenter_label` under the existing toggle
-- `routes/status.routes.js` copied
+## 5. Controllers and routes
 
-## 6. Events
+- Copy `controllers/auth/*`, `user/*`, `organization/*`, `request/*`, `service_account/*`, `scim/*`, `mail/*`, `config/gravatar.js`, `app/updates.js` and `routes/auth.routes.js`, `user.routes.js`, `organization.routes.js`, `request.routes.js`, `service_account.routes.js`, `scim.routes.js`, `mail.routes.js`, `system.routes.js`; the box, ISO, download and storage parts are trimmed
+- The rule files the copied routes validate against are copied with them
 
-- Copy `utils/events.js` with `TOPICS = ['session', 'notifications', 'health', 'profile', 'tasks', 'hosts', 'monitoring', 'sessions']`, `routes/events.routes.js` with `authenticate` in place of `authJwt`, `utils/notificationRelay.js` with its token source redirected
-- New `utils/agentRelay.js`: for each registered agent, while any browser subscribes to a family topic, one upstream `GET {agent}/api/events?topics=tasks,hosts,monitoring,sessions,health` with the agent's key, each frame re-broadcast through `broadcast(topic, event, { ...data, agent_id })`, `health` re-broadcast as the agent's health keyed by `agent_id`, `monitoring` opened only while a browser asked for that agent's; reconnect with `Last-Event-ID` on jittered backoff; closed when the last subscriber leaves
-- `registry.js` and `manage.js` publish `servers-updated` after add, remove, update and after a `capabilities` change
-- `utils/agentHealthPoller.js` deleted; `refreshStatus` runs on registration and on each upstream `ready`
-- `controllers/auth/backchannelLogout.js` and logout publish `session-terminated`; `preferences.js` publishes `profile-updated`
+## 6. Behaviours this server keeps as its own routes
 
-## 7. Health, rules, client errors, ticket
+- Password change that checks the current password
+- Self-delete that checks the password and the typed confirmation
+- The user list of one organization for its admins, with the inactive filter
+- Invitation resend by id with its own expiry
+- Organization stats
+- Organization name check
+- User deactivate and reactivate, with the own-account guard
 
-- `GET /api/health` answers `{ status, timestamp, services: { database, agents }, supported_languages, default_language, frontend_logging }`, `agents` the worst of the registry's last-seen states; published on the `health` topic when it changes
-- Copy `controllers/rules.controller.js`, `utils/rules.js` with `FORMS = ['login', 'register', 'password', 'email', 'displayName', 'profile', 'invitation', 'organization']`, `rules/defs.json` and those eight rule files, `routes/rules.routes.js`, `middleware/validate.js`
-- Copy `routes/client_errors.routes.js`, `controllers/client_errors/report.js`
-- `controllers/ConfigController.js` reads the plain `app` file; `routes/config.routes.js` copied without gravatar
+## 7. Removal
 
-## 8. Agent path prefix
+- `controllers/RegistrationController.js`, `AccountController.js`, `AuthController.js`, `OidcController.js`, `LdapController.js`, `UserManagementController.js`, `OrganizationController.js`, `InvitationController.js`, `MailController.js`, `controllers/users/*`, `organizations/*`, `invitations/*`
+- `auth/oidcStrategies.js`, `oidcLogout.js`, `externalUser.js`, `ldapStrategy.js`, `ldapClient.js`, `auth.js`
+- `models/organization.model.js`, `revokedSession.model.js`, `config/DatabaseMigrations.js`, `utils/SequelizeSessionStore.js`
+- `routes/admin.routes.js`, `organizations.routes.js`, `gravatar.js`
+- The packages section 1 names
 
-- `controllers/servers/proxy.js`: the target is `${serverUrl}/api/${path}` unless `path` already starts with `api/`
-- `models/serverRequests.js`: `fetchStatus`, `probeStatus`, `testServerWithApiKey`, `bootstrapApiKey`, `/stats` and every `makeRequest` call under `/api/`
-- `utils/wsProxy.js`: every backend URL under `/api/`
-- `refreshStatus` stores the agent's whole status payload as `capabilities`
-- `utils/orgAccess.js` route allowlist entries keep their agent-relative paths
+## 8. Rewiring
 
-## 9. Favorites, notifications, search
+- `index.js` follows the order of BoxVault's `server.js`: the database opens after setup, `upgradeSchema` runs, the roles are seeded; the WebSocket upgrade, the agent docs relay and `force_secure` stay
+- `utils/orgAccess.js` and `orgVisibility.js` read `user_organizations`
+- `controllers/StatusController.js`, `HealthController.js`, `search/finders.js`, `search/scope.js`, `OrgAccessController.js`, `servers/*`, `utils/agentRelay.js`, `wsProxy.js` read the new models and gates
 
-- Copy `routes/favorites.routes.js`, `controllers/favorites/user.js`, `routes/notification.routes.js`, `controllers/notification.controller.js` (the push, subscription and test routes answer 503 not-configured the way `notifications.go` does; `utils/notifyHub.js` not copied)
-- `controllers/favorites/get.js`, `save.js`, `enriched.js` and the `/api/favorites*`, `/api/userinfo/favorites` routes retire; `claims.js` stays
-- Copy `controllers/search/search.js`, `scope.js`; new `controllers/search/finders.js` with `host` over the registry rows, `machine` over each visible agent's `GET /api/machines`, `user` and `organization` over the local tables; `routes/search.routes.js`; `GET /opensearch.xml` from BoxVault's `opensearch.controller.js`
+## 9. What the shared UI reads
 
-## 10. UI serving
+- `GET /api/user` and the sign-in answer carry `role`: `super-admin` for a global admin, `admin` for an owner or admin of an organization, `user` otherwise
+- `roles` carries `ROLE_ADMIN` for a global admin
+- The proxy target keeps one `api/` prefix when the path already starts with it
+- `GET /api/servers?includeApiKeys=true` answers each key to a global admin
+- `GET /api/config/ticket` is answered before the engine's `/config/:name`
+- `GET /api/status` answers a sending origin
 
-- Copy `middleware/uiIndex.js` without the sites stamping
-- `index.js`: `express.static('ui', { index: false })` at `/`, `GET /index.html` to `uiIndex(404)`, `GET /manifest.json`, `GET /opensearch.xml`, the `*splat` catch-all to `uiIndex()`; the `/ui` mount and `/ui/*splat` fallback retire; `/docs` 503 stays; `/agent/api-docs` relay stays
-- CORS: origins `frontend_url`, `security.cors.whitelist`, `https://provisioner-catalog.startcloud.com`; headers `x-access-token`, `Authorization`, `Origin`, `Content-Type`, `Accept`; `exposedHeaders ['X-Refreshed-Token']`; `GET /api/status` public with `Vary: Origin`
+## 10. Packaging
 
-## 11. Settings surface retires
+- `packaging/DEBIAN/systemd/hyperweaver-server-update.path`, `hyperweaver-server-update.service` and `packaging/scripts/certbot-deploy-hook.sh` are copied from BoxVault's and renamed to `hyperweaver-server`
+- `routes/system.routes.js` mounts `/api/app/updates/check` and `/api/app/updates/apply`
+- `config/app.dev.config.yaml` gains the `updates` block
+- `config/locales/en.json` names Hyperweaver wherever it names BoxVault
 
-- `controllers/SettingsController.js`, `controllers/settings/configWriter.js`, `controllers/CollectionController.js`, `controllers/BackupController.js`, `controllers/SslController.js` and their `/api/settings*` routes deleted; the engine's `/api/config/*` and `/api/setup*` routes serve the admin and setup pages; the SSL upload is the `action: upload` on the two SSL leaves of `app.schema.yaml`
-- `routes/index.js` split mechanically into `routes/auth.routes.js`, `routes/user.routes.js`, `routes/servers.routes.js`, `routes/organizations.routes.js`, `routes/admin.routes.js`, each mounted at `/api` in `index.js`
+## 11. The brief
 
-## 12. Packaging and docs
+- Every open section of `notifications.md`, in its own order
 
-- `prod-build.yml` and `dev-build.yml`: copy `config/schema`, `packaging/config/*.yaml` to `/opt/hyperweaver-server/config-templates/`, `scripts/`; the `production-config.yaml` copy line removed
-- `packaging/DEBIAN/man/hyperweaver-server.8` and `hyperweaver-server.yaml.5`, `README.md`: name `CONFIG_DIR`, the four files, `/api/config/<name>`, `setup.token`, `hwa://open`
-- `release-please-config.json` `extra-files` drops `packaging/config/production-config.yaml`; `scripts/sync-versions.js` drops the yaml regex blocks
-- `packaging/config/production-config.yaml` deleted
-
-## 13. Swagger
-
-- `config/swagger.js`: security schemes `sessionAuth` apiKey `x-access-token` and `bearerAuth`; `Problem` schema added; `User` schema matches `GET /api/user`
-
-## 14. Brief
-
-- `notifications.md`: every section the above closes is deleted; sections 7b, 7c, 7d, 8c, 8d and 8g stay until their agent surfaces land
-
-## Verification after every change
+## 12. Proof
 
 - `npm run format && npm run lint:fix`
-- `npm start` against a development `config/*.dev.config.yaml`, `GET /api/status`, `GET /api/health`, `GET /api/rules`, a signin, `GET /api/user`, `GET /api/events?topics=session,hosts`
+- `npm start` against `config/*.dev.config.yaml`, then every page of the pinned UI build against a live agent
+
+## 13. Other repositories, by brief
+
+- startcloud-ui: `FOLLOWUPS/universal-access.md` as a contract, the controls for section 6
+- authorization-server, BoxVault, hyperweaver-agent, zoneweaver-agent: the role and permission form of that contract

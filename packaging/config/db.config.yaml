@@ -1,15 +1,15 @@
-schemaVersion: 1
-database:
-  dialect: sqlite
-  storage: /var/lib/hyperweaver-server/database/hyperweaver-server.db
+schemaVersion: 2
+database_type: sqlite
+sql:
   host: localhost
   port: 3306
-  user: hyperweaver_server
-  password: ''
-  database_name: hyperweaver_server
   logging: false
-  pool:
-    max: 5
-    min: 0
-    acquire: 30000
-    idle: 10000
+  user: hyperweaver_server
+  password: CHANGE_THIS_PASSWORD
+  database: hyperweaver_server
+  storage: /var/lib/hyperweaver-server/database/hyperweaver-server.db
+mysql_pool:
+  max: 5
+  min: 0
+  acquire: 30000
+  idle: 5000

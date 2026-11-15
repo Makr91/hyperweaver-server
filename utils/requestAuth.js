@@ -1,126 +1,365 @@
+import { createHash } from 'crypto';
+import axios from 'axios';
 import jwt from 'jsonwebtoken';
-import { decodeJwt } from 'jose';
+import {
+  EmbeddedJWK,
+  calculateJwkThumbprint,
+  decodeJwt,
+  decodeProtectedHeader,
+  jwtVerify,
+} from 'jose';
+import { getOrigin, loadConfig } from './config-loader.js';
 import { log } from './Logger.js';
 import { verifySessionToken } from './auth.js';
+import { findProviderByIssuer } from './oidcProviders.js';
+import { getRemoteJwks } from './jwks.js';
+import { findServiceAccountByRawToken, touchServiceAccount } from './serviceAccountAuth.js';
+import { getOidcConfiguration } from '../auth/passport.js';
+import externalUserHandler from '../auth/external-user-handler.js';
 import db from '../models/index.js';
 
 const { JsonWebTokenError, TokenExpiredError } = jwt;
-const { user: User, revokedSession: RevokedSession } = db;
+const { credential: Credential, user: User, revokedSession: RevokedSession } = db;
 
-/**
- * The session JWT a request carries: `x-access-token` first, the shared
- * UI's header, then `Authorization: Bearer`.
- * @param {import('express').Request} req - The request
- * @returns {string|null} The token, or null
- */
-const sessionTokenOf = req => {
-  const header = req.headers['x-access-token'];
-  if (typeof header === 'string' && header !== '') {
-    return header;
+const AUTHORIZATION_SCHEMES = ['Bearer', 'DPoP'];
+const PROOF_MAX_AGE_SECONDS = 60;
+const JTI_TTL_MS = 300 * 1000;
+
+const seenProofs = new Map();
+
+const purgeSeenProofs = () => {
+  const now = Date.now();
+  for (const [jti, expiresAt] of seenProofs) {
+    if (expiresAt <= now) {
+      seenProofs.delete(jti);
+    }
   }
-  const [scheme, ...rest] = (req.headers.authorization || '').split(' ');
-  const token = rest.join(' ').trim();
-  return scheme === 'Bearer' && token ? token : null;
 };
 
-const providerSessionOf = oidc => {
-  if (typeof oidc?.id_token !== 'string') {
+/**
+ * The credential on the Authorization header, when its scheme is one a
+ * BoxVault gate understands.
+ * @param {import('express').Request} req - The request
+ * @returns {{scheme: string, token: string}|null} The scheme and token, or null
+ */
+const authorizationCredential = req => {
+  const [scheme, ...rest] = (req.headers.authorization || '').split(' ');
+  const token = rest.join(' ').trim();
+  if (!token || !AUTHORIZATION_SCHEMES.includes(scheme)) {
+    return null;
+  }
+  return { scheme, token };
+};
+
+const isJwt = token => token.split('.').length === 3;
+
+const issuerOf = token => {
+  if (!isJwt(token)) {
     return null;
   }
   try {
-    const { iss, sid } = decodeJwt(oidc.id_token);
+    return decodeJwt(token).iss || null;
+  } catch {
+    return null;
+  }
+};
+
+const htuOf = req => {
+  const { origin } = new URL(getOrigin(req.hostname));
+  const [path] = req.originalUrl.split('?');
+  return `${origin}${path}`;
+};
+
+/**
+ * Verify a DPoP proof against the request and the token it binds, by the
+ * rules the catalog Worker applies.
+ * @param {string} proof - The DPoP header value
+ * @param {import('express').Request} req - The request the proof covers
+ * @param {string} token - The presented access token
+ * @param {string} boundJkt - The token's cnf.jkt thumbprint
+ * @returns {Promise<void>}
+ * @throws {Error} With the reason the proof is refused
+ */
+const verifyProof = async (proof, req, token, boundJkt) => {
+  const header = decodeProtectedHeader(proof);
+  if (header.typ !== 'dpop+jwt' || header.alg !== 'ES256') {
+    throw new Error('unsupported DPoP proof');
+  }
+  const { jwk } = header;
+  if (!jwk || jwk.kty !== 'EC' || jwk.crv !== 'P-256' || !jwk.x || !jwk.y || jwk.d) {
+    throw new Error('bad DPoP proof key');
+  }
+  const { payload } = await jwtVerify(proof, EmbeddedJWK, {
+    algorithms: ['ES256'],
+    typ: 'dpop+jwt',
+  });
+  if (payload.htm !== req.method) {
+    throw new Error('DPoP htm mismatch');
+  }
+  if (payload.htu !== htuOf(req)) {
+    throw new Error('DPoP htu mismatch');
+  }
+  const now = Math.floor(Date.now() / 1000);
+  if (typeof payload.iat !== 'number' || Math.abs(now - payload.iat) > PROOF_MAX_AGE_SECONDS) {
+    throw new Error('DPoP proof expired');
+  }
+  if (payload.ath !== createHash('sha256').update(token).digest('base64url')) {
+    throw new Error('DPoP ath mismatch');
+  }
+  if ((await calculateJwkThumbprint(jwk)) !== boundJkt) {
+    throw new Error('DPoP key does not match the token binding');
+  }
+  if (typeof payload.jti !== 'string' || !payload.jti) {
+    throw new Error('DPoP jti required');
+  }
+  purgeSeenProofs();
+  if (seenProofs.has(payload.jti)) {
+    throw new Error('DPoP proof replayed');
+  }
+  seenProofs.set(payload.jti, Date.now() + JTI_TTL_MS);
+};
+
+const fetchUserInfo = async (userinfoEndpoint, token, verifiedClaims) => {
+  if (!userinfoEndpoint) {
+    return verifiedClaims;
+  }
+  try {
+    const response = await axios.get(userinfoEndpoint, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    return { ...verifiedClaims, ...response.data };
+  } catch (err) {
+    log.auth.warn('Resource-server: userinfo fetch failed, using token claims', {
+      error: err.message,
+    });
+    return verifiedClaims;
+  }
+};
+
+const resolveExternalUserId = async ({ claims, token, issuer, providerName, meta, authConfig }) => {
+  const subject = claims.UUID || claims.sub;
+  if (!subject) {
+    throw new Error('token carries no subject');
+  }
+  const credential = await Credential.findByIssuerAndSubject(issuer, subject);
+  if (credential) {
+    const linkedUser = await User.findByPk(credential.user_id);
+    if (!linkedUser || linkedUser.suspended) {
+      throw new Error('user missing or suspended');
+    }
+    if (Array.isArray(claims.organizations)) {
+      await externalUserHandler.syncOrganizationsFromClaim(linkedUser, claims, issuer, db);
+    }
+    return linkedUser.id;
+  }
+  const profile = await fetchUserInfo(meta.userinfo_endpoint, token, claims);
+  const provisionedUser = await externalUserHandler.handleExternalUser(
+    `oidc-${providerName}`,
+    profile,
+    db,
+    authConfig
+  );
+  return provisionedUser.id;
+};
+
+const resolveExternalAuth = async (req, { scheme, token }) => {
+  const issuer = issuerOf(token);
+  const providerName = issuer ? findProviderByIssuer(issuer) : null;
+  if (!providerName) {
+    return null;
+  }
+  const authConfig = loadConfig('auth');
+  if (!authConfig.auth?.resource_server?.enabled) {
+    throw new Error('resource server disabled');
+  }
+  const { audience } = authConfig.auth.resource_server;
+  if (!audience) {
+    throw new Error('auth.resource_server.audience is not configured');
+  }
+  const oidcConfig = getOidcConfiguration(providerName);
+  if (!oidcConfig) {
+    throw new Error(`provider ${providerName} not discovered yet`);
+  }
+  const meta = oidcConfig.serverMetadata();
+  const { payload: claims } = await jwtVerify(token, getRemoteJwks(meta.jwks_uri), {
+    issuer,
+    audience,
+  });
+  const boundJkt = claims.cnf?.jkt;
+  if (scheme === 'Bearer' && boundJkt) {
+    throw new Error('key-bound token presented as Bearer');
+  }
+  if (scheme === 'DPoP') {
+    if (!boundJkt) {
+      throw new Error('token is not key-bound');
+    }
+    const proof = req.headers.dpop;
+    if (!proof) {
+      throw new Error('DPoP proof required');
+    }
+    await verifyProof(proof, req, token, boundJkt);
+  }
+  const userId = await resolveExternalUserId({
+    claims,
+    token,
+    issuer,
+    providerName,
+    meta,
+    authConfig,
+  });
+  log.auth.info('Authenticated via identity-provider token', {
+    provider: providerName,
+    userId,
+    scheme,
+  });
+  return {
+    userId,
+    isServiceAccount: false,
+    provider: `oidc-${providerName}`,
+    oidcAccessToken: token,
+    claims,
+  };
+};
+
+const providerSessionOf = claims => {
+  if (typeof claims.id_token !== 'string') {
+    return null;
+  }
+  try {
+    const { iss, sid } = decodeJwt(claims.id_token);
     return iss && sid ? { issuer: iss, sid: String(sid) } : null;
   } catch {
     return null;
   }
 };
 
-const isSessionRevoked = async oidc => {
-  const named = providerSessionOf(oidc);
+const isSessionRevoked = async claims => {
+  const named = providerSessionOf(claims);
   if (!named) {
     return false;
   }
   return Boolean(await RevokedSession.findOne({ where: named }));
 };
 
-const isTokenRevoked = (claims, sessionsInvalidAfter) =>
-  Boolean(
-    claims.iat &&
-    sessionsInvalidAfter &&
-    claims.iat * 1000 < new Date(sessionsInvalidAfter).getTime()
-  );
-
 /**
- * The OIDC token stash of the request's server-side session, when it
- * belongs to the signed-in user named by the JWT.
- * @param {import('express').Request} req - The request
- * @param {number} userId - The JWT's user
- * @returns {Object|null} `req.session.oidc`, or null
+ * The claims of a session JWT that failed only on `exp`, when the session is
+ * an identity-provider one carrying a refresh token: the provider is the
+ * judge of whether it lives on, so the claims are read with expiry ignored
+ * and the signature, issuer and audience still enforced. Any other lapsed
+ * token stays refused.
+ * @param {string} token - The presented session JWT
+ * @returns {Promise<Object|null>} The claims, or null
  */
-const oidcStashOf = (req, userId) => {
-  const oidc = req.session?.oidc;
-  return oidc && oidc.userId === userId ? oidc : null;
+const lapsedOidcClaims = async token => {
+  const claims = await verifySessionToken(token, { ignoreExpiration: true });
+  const renewable =
+    typeof claims.provider === 'string' &&
+    claims.provider.startsWith('oidc-') &&
+    typeof claims.oidc_refresh_token === 'string' &&
+    claims.oidc_refresh_token !== '' &&
+    !claims.is_service_account;
+  return renewable ? claims : null;
 };
 
-/**
- * Resolve the caller behind a request's session JWT: the signature, issuer
- * and audience verified, the user active, the token issued after the
- * user's revocation cutoff, and for a federated session the identity
- * provider's `sid` not revoked by a back-channel logout. With
- * `allowLapsed`, a JWT that failed only on `exp` resolves with `lapsed`
- * true when its session holds a refresh token, for the refresh route
- * alone.
- * @param {import('express').Request} req - The request
- * @param {{allowLapsed?: boolean}} [options] - Whether a lapsed federated session resolves
- * @returns {Promise<{userId: number, username: string, email: string, role: string, provider: string, claims: Object, lapsed: boolean, oidc: Object|null}|null>} The caller, or null
- */
-const resolveRequestAuth = async (req, { allowLapsed = false } = {}) => {
-  const token = sessionTokenOf(req);
-  if (!token) {
-    return null;
-  }
-  let claims;
-  let lapsed = false;
+const resolveSessionAuth = async (token, allowLapsedOidc) => {
   try {
-    claims = await verifySessionToken(token);
+    let lapsed = false;
+    let claims;
+    try {
+      claims = await verifySessionToken(token);
+    } catch (err) {
+      if (!(allowLapsedOidc && err instanceof TokenExpiredError)) {
+        throw err;
+      }
+      claims = await lapsedOidcClaims(token);
+      if (!claims) {
+        throw err;
+      }
+      lapsed = true;
+    }
+    if (await isSessionRevoked(claims)) {
+      log.auth.info('Session token refused: the identity provider ended its session', {
+        userId: claims.id,
+      });
+      return null;
+    }
+    if (claims.is_service_account && claims.service_account_id) {
+      await touchServiceAccount(claims.service_account_id);
+    }
+    return {
+      userId: claims.id,
+      isServiceAccount: claims.is_service_account || false,
+      serviceAccountId: claims.service_account_id,
+      stayLoggedIn: claims.stay_logged_in,
+      organizations: claims.organizations,
+      claims,
+      lapsed,
+    };
   } catch (err) {
     if (!(err instanceof JsonWebTokenError)) {
       throw err;
     }
-    if (!allowLapsed || !(err instanceof TokenExpiredError)) {
-      log.auth.debug('Session token rejected', { error: err.message });
+    log.auth.debug('Session token rejected', { error: err.message });
+    return null;
+  }
+};
+
+/**
+ * Resolve the caller behind a request's credentials, in order: the BoxVault
+ * session JWT on x-access-token; an access token of a configured identity
+ * provider on Authorization, as Bearer or, when key-bound, as DPoP with a
+ * proof; a raw service-account key on Authorization: Bearer or x-access-token.
+ * A refused credential logs its reason and resolves to null; a JWT that fails
+ * verification is refused outright and never retried as a raw key. With
+ * allowLapsedOidc, a session JWT that failed only on `exp` and belongs to an
+ * identity-provider session carrying a refresh token resolves with `lapsed`
+ * true, for the refresh route alone.
+ * @param {import('express').Request} req - The request
+ * @param {{sessionOnly?: boolean, allowLapsedOidc?: boolean}} [options] - sessionOnly accepts the session JWT alone; allowLapsedOidc admits a lapsed identity-provider session
+ * @returns {Promise<{userId: number, isServiceAccount: boolean, serviceAccountId?: number,
+ *   stayLoggedIn?: boolean, organizations?: Object[], provider?: string,
+ *   oidcAccessToken?: string, claims?: Object, lapsed?: boolean}|null>} The caller, or null
+ * @throws {Error} When the configuration cannot be loaded
+ */
+const resolveRequestAuth = async (req, { sessionOnly = false, allowLapsedOidc = false } = {}) => {
+  const sessionToken = req.headers['x-access-token'];
+  if (sessionToken) {
+    const session = await resolveSessionAuth(sessionToken, allowLapsedOidc);
+    if (session) {
+      return session;
+    }
+    if (isJwt(sessionToken)) {
       return null;
     }
-    claims = await verifySessionToken(token, { ignoreExpiration: true });
-    lapsed = true;
   }
-  const user = await User.findByPk(claims.userId);
-  if (!user || user.is_active === false) {
+  if (sessionOnly) {
     return null;
   }
-  if (isTokenRevoked(claims, user.sessions_invalid_after)) {
-    return null;
+  const credential = authorizationCredential(req);
+  if (credential) {
+    try {
+      const external = await resolveExternalAuth(req, credential);
+      if (external) {
+        return external;
+      }
+    } catch (err) {
+      log.auth.info('Identity-provider token refused', { error: err.message });
+      return null;
+    }
   }
-  const oidc = oidcStashOf(req, user.id);
-  if (lapsed && !oidc?.refresh_token) {
-    return null;
-  }
-  if (oidc && (await isSessionRevoked(oidc))) {
-    log.auth.info('Session token refused: the identity provider ended its session', {
-      userId: user.id,
-    });
+  const rawKeys = [credential?.scheme === 'Bearer' ? credential.token : null, sessionToken].filter(
+    rawKey => rawKey && !isJwt(rawKey)
+  );
+  const accounts = await Promise.all(rawKeys.map(rawKey => findServiceAccountByRawToken(rawKey)));
+  const serviceAccount = accounts.find(Boolean);
+  if (!serviceAccount) {
     return null;
   }
   return {
-    userId: user.id,
-    username: user.username,
-    email: user.email,
-    role: user.role,
-    provider: claims.auth_provider || user.auth_provider || 'local',
-    claims,
-    lapsed,
-    oidc,
+    userId: serviceAccount.userId,
+    isServiceAccount: true,
+    serviceAccountId: serviceAccount.id,
   };
 };
 
-export { sessionTokenOf, resolveRequestAuth };
+export { authorizationCredential, resolveRequestAuth };

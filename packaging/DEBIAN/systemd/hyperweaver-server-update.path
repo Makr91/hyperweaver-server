@@ -2,8 +2,8 @@
 Description=Watch for a Hyperweaver Server self-update request
 
 [Path]
-PathExists=/var/lib/Hyperweaver Server/update.request
-Unit=Hyperweaver Server-update.service
+PathExists=/var/lib/hyperweaver-server/update.request
+Unit=hyperweaver-server-update.service
 
 [Install]
 WantedBy=multi-user.target

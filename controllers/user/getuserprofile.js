@@ -1,46 +1,11 @@
-import { createHash } from 'crypto';
+// getuserprofile.js
 import { resolveUserOrganizations } from '../../utils/userOrgs.js';
 import { log } from '../../utils/Logger.js';
 import { problem } from '../../utils/problem.js';
 import db from '../../models/index.js';
-const { user: User } = db;
-
-const emailHashOf = email =>
-  createHash('sha256')
-    .update(
-      String(email || '')
-        .trim()
-        .toLowerCase()
-    )
-    .digest('hex');
-
-/**
- * The profile `GET /api/user` and the sign-in answers carry: the shared
- * UI's `backend` session shape over this server's user row.
- * @param {Object} user - The user row, its organization association loaded
- * @param {Object} req - The request, its session carrying the OIDC stash
- * @returns {Promise<Object>} The profile
- */
-export const profileOf = async (user, req) => {
-  const { organizations, primaryOrgName } = await resolveUserOrganizations(user, req);
-  return {
-    id: user.id,
-    username: user.username,
-    name: user.name || null,
-    preferred_language: user.preferred_language || null,
-    preferred_mode: user.preferred_mode || null,
-    preferred_theme: user.preferred_theme || null,
-    preferred_motion: user.preferred_motion || null,
-    email: user.email,
-    verified: true,
-    email_hash: emailHashOf(user.email),
-    avatar_url: user.avatar_url || null,
-    roles: [`ROLE_${String(user.role).toUpperCase().replace('-', '_')}`],
-    organization: primaryOrgName,
-    organizations,
-    entitlements: [],
-  };
-};
+import { profileOf } from '../../utils/profile.js';
+import { hostRoleOf } from '../../utils/hostRole.js';
+const { user: User, role: Role, organization: Organization } = db;
 
 /**
  * @swagger
@@ -193,7 +158,20 @@ export const profileOf = async (user, req) => {
 export const getUserProfile = async (req, res) => {
   try {
     const user = await User.findByPk(req.userId, {
-      include: [{ association: 'organization', attributes: ['id', 'name', 'org_uuid'] }],
+      include: [
+        {
+          model: Role,
+          as: 'roles',
+          attributes: ['name'],
+          through: { attributes: [] },
+        },
+        {
+          model: Organization,
+          as: 'primaryOrganization',
+          attributes: ['name'],
+        },
+      ],
+      order: [[{ model: Role, as: 'roles' }, 'id', 'ASC']],
     });
 
     if (!user) {
@@ -204,8 +182,30 @@ export const getUserProfile = async (req, res) => {
       });
     }
 
+    const { userOrganizations: organizations } = await resolveUserOrganizations(user);
+
+    const authorities = user.roles.map(role => `ROLE_${role.name.toUpperCase()}`);
+
     res.set('Cache-Control', 'no-store');
-    return res.status(200).send(await profileOf(user, req));
+    return res.status(200).send({
+      id: user.id,
+      username: user.username,
+      name: user.name || null,
+      preferred_language: user.preferredLanguage || null,
+      preferred_mode: user.preferredMode || null,
+      preferred_theme: user.preferredTheme || null,
+      preferred_motion: user.preferredMotion || null,
+      email: user.email,
+      verified: user.verified,
+      email_hash: user.emailHash,
+      avatar_url: user.avatar_url,
+      ...profileOf(user),
+      roles: authorities,
+      role: hostRoleOf(authorities, organizations),
+      organization: user.primaryOrganization ? user.primaryOrganization.name : null,
+      organizations,
+      entitlements: user.entitlements || [],
+    });
   } catch (error) {
     log.error.error('Error retrieving user profile:', error);
     return problem(res, req, {

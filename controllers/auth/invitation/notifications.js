@@ -1,0 +1,35 @@
+import { getOrigin } from '../../../utils/config-loader.js';
+import { log } from '../../../utils/Logger.js';
+import { sendHubNotification } from '../../../utils/notifyHub.js';
+import { resolveUserRecipients } from '../../../utils/notifyRecipients.js';
+
+const notifyInvitationAccepted = async (invitation, organization, acceptedUser) => {
+  try {
+    if (!invitation.invited_by) {
+      return;
+    }
+    const origin = getOrigin();
+    const recipients = await resolveUserRecipients([invitation.invited_by]);
+    await Promise.all(
+      recipients.map(({ issuer, uuid }) =>
+        sendHubNotification({
+          issuer,
+          recipient: { user_uuid: uuid },
+          notification: {
+            title: `Invitation accepted for ${organization.name}`,
+            body: `${acceptedUser.email} joined as ${invitation.invited_role}.`,
+            navigate: `${origin}/org-console/members#${acceptedUser.id}`,
+            tag: 'hyperweaver-server-invite-accepted',
+          },
+          type: 'ACCOUNT',
+          severity: 'INFO',
+          idempotencyKey: `hyperweaver-server:invite-accepted:${invitation.id}:user:${uuid}`,
+        })
+      )
+    );
+  } catch (err) {
+    log.app.warn('Invitation-accepted notification skipped', { error: err.message });
+  }
+};
+
+export { notifyInvitationAccepted };

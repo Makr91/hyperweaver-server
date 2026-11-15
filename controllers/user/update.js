@@ -1,0 +1,95 @@
+// update.js
+import { log } from '../../utils/Logger.js';
+import { problem } from '../../utils/problem.js';
+import db from '../../models/index.js';
+import { generateEmailHash } from '../../utils/identity.js';
+import { notifyProfileUpdated } from '../../utils/events.js';
+const { user: User } = db;
+
+/**
+ * @swagger
+ * /api/organization/{organizationName}/users/{userName}:
+ *   put:
+ *     summary: Update a user in an organization
+ *     description: Change a user's email address (Admin only). Global roles are written through PUT /api/users/{userId}/roles.
+ *     tags: [Users]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: organizationName
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Organization name
+ *       - in: path
+ *         name: userName
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Username
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 description: New email address
+ *     responses:
+ *       200:
+ *         description: User updated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/User'
+ *       404:
+ *         description: User or organization not found
+ *         content:
+ *           application/problem+json:
+ *             schema:
+ *               $ref: '#/components/schemas/Problem'
+ *       500:
+ *         description: Internal server error
+ *         content:
+ *           application/problem+json:
+ *             schema:
+ *               $ref: '#/components/schemas/Problem'
+ */
+export const update = async (req, res) => {
+  const { userName } = req.params;
+  const { email } = req.body;
+
+  try {
+    const user = await User.findOne({
+      where: { username: userName },
+    });
+
+    if (!user) {
+      return problem(res, req, {
+        status: 404,
+        type: 'not-found',
+        title: req.__('users.userNotFound'),
+      });
+    }
+
+    if (email) {
+      user.email = email;
+      user.emailHash = generateEmailHash(email);
+      await user.save();
+      notifyProfileUpdated(user.id);
+    }
+
+    return res.status(200).send({ message: 'User was updated successfully.' });
+  } catch (err) {
+    log.error.error('Error updating user:', err);
+    return problem(res, req, {
+      status: 500,
+      type: 'internal',
+      title: req.__('users.update.error'),
+    });
+  }
+};

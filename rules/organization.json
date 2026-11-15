@@ -10,6 +10,7 @@
     },
     "org_code": { "$ref": "#/$defs/orgCode", "unique": "global" },
     "email": { "$ref": "#/$defs/email" },
-    "description": { "type": "string" }
+    "description": { "type": "string" },
+    "base_domain": { "$ref": "#/$defs/domainName" }
   }
 }

@@ -35,7 +35,7 @@ We appreciate all pull requests! To ensure smooth collaboration:
 3. Copy `packaging/config/production-config.yaml` to `./config.yaml` and configure for development
 4. Fetch the pinned UI artifact into `./ui` (see [README.md](README.md))
 5. Run in development mode: `npm run dev`
-6. Access the API documentation at `https://localhost:3443/api-docs`
+6. Access the API documentation at `https://localhost:3443/api/docs`
 
 ### Code Style Guidelines
 

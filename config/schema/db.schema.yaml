@@ -1,6 +1,6 @@
 $schema: https://json-schema.org/draft/2020-12/schema
-title: Database
-schemaVersion: 1
+title: Database Config
+schemaVersion: 2
 sections:
   database:
     title: Database
@@ -9,50 +9,37 @@ properties:
   schemaVersion:
     type: integer
     readOnly: true
-    default: 1
+    default: 2
     title: Schema version
-  database:
-    type: object
+  database_type:
+    type: string
+    enum:
+      - mysql
+      - sqlite
+    default: sqlite
     section: database
     subsection: generalSettings
-    title: General
+    title: Database type
+    description: MySQL for production, SQLite for simple deployments
+    order: 1
+    requiresRestart: true
+    restartReason: the database connection is opened at boot
+  sql:
+    type: object
+    section: database
+    subsection: databaseConnection
+    title: Database Connection
     properties:
-      dialect:
-        type: string
-        enum:
-          - sqlite
-          - mysql
-          - postgresql
-          - mariadb
-        default: sqlite
-        title: Dialect
-        description: SQLite for simple deployments, MySQL, PostgreSQL or MariaDB for production
-        order: 1
-        requiresRestart: true
-        restartReason: the database connection is opened at boot
-      storage:
-        type: string
-        default: /var/lib/hyperweaver-server/database/hyperweaver-server.db
-        title: SQLite file
-        description: SQLite database file path
-        dependsOn: dialect
-        showWhen:
-          - sqlite
-        order: 2
-        requiresRestart: true
-        restartReason: the database connection is opened at boot
       host:
         type: string
         format: hostname
         default: localhost
         title: Host
-        description: Database server hostname or IP address
-        dependsOn: dialect
+        description: Database host
+        dependsOn: database_type
         showWhen:
           - mysql
-          - postgresql
-          - mariadb
-        order: 3
+        order: 1
         requiresRestart: true
         restartReason: the database connection is opened at boot
       port:
@@ -61,26 +48,30 @@ properties:
         maximum: 65535
         default: 3306
         title: Port
-        description: Database server port
-        dependsOn: dialect
+        description: Database port
+        dependsOn: database_type
         showWhen:
           - mysql
-          - postgresql
-          - mariadb
-        order: 4
+        order: 2
+        requiresRestart: true
+        restartReason: the database connection is opened at boot
+      logging:
+        type: boolean
+        default: false
+        title: SQL query logging
+        description: Log SQL queries to the backend console
+        order: 3
         requiresRestart: true
         restartReason: the database connection is opened at boot
       user:
         type: string
         default: hyperweaver_server
         title: User
-        description: Database username
-        dependsOn: dialect
+        description: Database user
+        dependsOn: database_type
         showWhen:
           - mysql
-          - postgresql
-          - mariadb
-        order: 5
+        order: 4
         requiresRestart: true
         restartReason: the database connection is opened at boot
       password:
@@ -89,75 +80,85 @@ properties:
         default: ''
         title: Password
         description: Database password
-        dependsOn: dialect
+        dependsOn: database_type
         showWhen:
           - mysql
-          - postgresql
-          - mariadb
+        order: 5
+        requiresRestart: true
+        restartReason: the database connection is opened at boot
+      database:
+        type: string
+        default: hyperweaver_server
+        title: Database
+        description: Database name
+        dependsOn: database_type
+        showWhen:
+          - mysql
         order: 6
         requiresRestart: true
         restartReason: the database connection is opened at boot
-      database_name:
+      storage:
         type: string
-        default: hyperweaver_server
-        title: Database name
-        description: Name of the database to connect to
-        dependsOn: dialect
+        default: /var/lib/hyperweaver-server/database/hyperweaver-server.db
+        title: SQLite file
+        description: SQLite database file path
+        dependsOn: database_type
         showWhen:
-          - mysql
-          - postgresql
-          - mariadb
+          - sqlite
         order: 7
         requiresRestart: true
         restartReason: the database connection is opened at boot
-      logging:
-        type: boolean
-        default: false
-        title: SQL query logging
-        description: Log SQL queries at debug level
-        order: 8
+  mysql_pool:
+    type: object
+    section: database
+    subsection: connectionPool
+    title: Connection Pool
+    properties:
+      max:
+        type: integer
+        minimum: 1
+        default: 5
+        title: Maximum connections
+        description: Maximum number of connections in the pool
+        dependsOn: database_type
+        showWhen:
+          - mysql
+        order: 1
         requiresRestart: true
-        restartReason: the database connection is opened at boot
-      pool:
-        type: object
-        subsection: connectionPool
-        title: Connection Pool
-        properties:
-          max:
-            type: integer
-            minimum: 1
-            maximum: 100
-            default: 5
-            title: Maximum connections
-            order: 1
-            requiresRestart: true
-            restartReason: the connection pool is created at boot
-          min:
-            type: integer
-            minimum: 0
-            maximum: 20
-            default: 0
-            title: Minimum connections
-            order: 2
-            requiresRestart: true
-            restartReason: the connection pool is created at boot
-          acquire:
-            type: integer
-            minimum: 1000
-            maximum: 300000
-            default: 30000
-            title: Acquire timeout (ms)
-            order: 3
-            requiresRestart: true
-            restartReason: the connection pool is created at boot
-          idle:
-            type: integer
-            minimum: 1000
-            maximum: 300000
-            default: 10000
-            title: Idle timeout (ms)
-            order: 4
-            requiresRestart: true
-            restartReason: the connection pool is created at boot
-    required:
-      - dialect
+        restartReason: the connection pool is created at boot
+      min:
+        type: integer
+        minimum: 0
+        default: 0
+        title: Minimum connections
+        description: Minimum number of connections in the pool
+        dependsOn: database_type
+        showWhen:
+          - mysql
+        order: 2
+        requiresRestart: true
+        restartReason: the connection pool is created at boot
+      acquire:
+        type: integer
+        minimum: 1
+        default: 30000
+        title: Acquire timeout (ms)
+        description: Milliseconds the pool waits for a connection before failing
+        dependsOn: database_type
+        showWhen:
+          - mysql
+        order: 3
+        requiresRestart: true
+        restartReason: the connection pool is created at boot
+      idle:
+        type: integer
+        minimum: 1
+        default: 10000
+        title: Idle timeout (ms)
+        description: Milliseconds a connection may sit idle before it is released
+        dependsOn: database_type
+        showWhen:
+          - mysql
+        order: 4
+        requiresRestart: true
+        restartReason: the connection pool is created at boot

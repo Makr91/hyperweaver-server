@@ -199,7 +199,7 @@ const buildContext = async (req, term) => {
     term,
     tokens: tokensOf(term),
     access,
-    isAdmin: access.bypass || req.user?.role === 'admin',
+    isAdmin: access.bypass,
   };
 };
 

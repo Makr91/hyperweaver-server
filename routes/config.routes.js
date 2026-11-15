@@ -1,7 +1,6 @@
 import { Router } from 'express';
-import ConfigController from '../controllers/ConfigController.js';
-import gravatarRouter from './gravatar.js';
-import { standardLimiter } from './limiters.js';
+import { getGravatarProfile } from '../controllers/config/gravatar.js';
+import { getTicketConfig } from '../controllers/config/ticket.js';
 
 const router = Router();
 
@@ -11,7 +10,7 @@ router.use((req, res, next) => {
   next();
 });
 
-router.use(gravatarRouter);
-router.get('/config/ticket', standardLimiter, ConfigController.getTicketConfig);
+router.get('/gravatar/profile/:emailHash', getGravatarProfile);
+router.get('/config/ticket', getTicketConfig);
 
 export default router;

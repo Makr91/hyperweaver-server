@@ -1,0 +1,117 @@
+// findallwithusers.js
+import { log } from '../../utils/Logger.js';
+import { problem } from '../../utils/problem.js';
+import db from '../../models/index.js';
+import { snakeKeys } from '../../utils/wire.js';
+const { organization: Organization, user: User, role: Role } = db;
+
+const MEMBER_ATTRIBUTES = [
+  'id',
+  'username',
+  'name',
+  'email',
+  'emailHash',
+  'verified',
+  'suspended',
+  'preferredLanguage',
+  'locale',
+  'preferredMode',
+  'preferredTheme',
+  'preferredMotion',
+  'timezone',
+  'authProvider',
+  'avatar_url',
+  'primary_organization_id',
+  'entitlements',
+  'createdAt',
+  'updatedAt',
+];
+
+/**
+ * @swagger
+ * /api/organizations-with-users:
+ *   get:
+ *     summary: Get all organizations with users
+ *     description: Retrieve all organizations with their users and roles.
+ *     tags: [Organizations]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: List of organizations with detailed user information
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 allOf:
+ *                   - $ref: '#/components/schemas/Organization'
+ *                   - type: object
+ *                     properties:
+ *                       members:
+ *                         type: array
+ *                         items:
+ *                           allOf:
+ *                             - $ref: '#/components/schemas/User'
+ *                             - type: object
+ *                               properties:
+ *                                 org_role:
+ *                                   type: string
+ *                                   description: The member's role in this organization
+ *       401:
+ *         description: Unauthorized - invalid token
+ *         content:
+ *           application/problem+json:
+ *             schema:
+ *               $ref: '#/components/schemas/Problem'
+ *       500:
+ *         description: Internal server error
+ *         content:
+ *           application/problem+json:
+ *             schema:
+ *               $ref: '#/components/schemas/Problem'
+ */
+export const findAllWithUsers = async (req, res) => {
+  try {
+    const organizations = await Organization.findAll({
+      include: [
+        {
+          model: User,
+          as: 'members',
+          attributes: MEMBER_ATTRIBUTES,
+          // Junction role = the user's role IN THIS ORG (distinct from the
+          // global `roles` include below)
+          through: { attributes: ['role'] },
+          include: [
+            {
+              model: Role,
+              as: 'roles',
+              attributes: ['name'],
+              through: { attributes: [] },
+            },
+          ],
+        },
+      ],
+    });
+
+    const result = organizations.map(org => ({
+      ...org.toJSON(),
+      members: org.members.map(user => {
+        const { UserOrg: membership, ...member } = user.get({ plain: true });
+        return {
+          ...snakeKeys(member),
+          org_role: membership?.role || null,
+        };
+      }),
+    }));
+
+    return res.status(200).send(result);
+  } catch (err) {
+    log.error.error('Error retrieving organizations with users:', err);
+    return problem(res, req, {
+      status: 500,
+      type: 'internal',
+      title: req.__('organizations.findAllError'),
+    });
+  }
+};

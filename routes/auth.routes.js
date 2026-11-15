@@ -1,47 +1,982 @@
-import { Router, urlencoded } from 'express';
-import { authenticate, optionalAuth, requireSuperAdmin } from '../auth/auth.js';
-import { oidcTokenRefresh } from '../auth/oidcTokenRefresh.js';
-import AuthController from '../controllers/AuthController.js';
-import RegistrationController from '../controllers/RegistrationController.js';
-import AccountController from '../controllers/AccountController.js';
-import LdapController from '../controllers/LdapController.js';
-import OidcController from '../controllers/OidcController.js';
-import UserManagementController from '../controllers/UserManagementController.js';
-import { signin, exchange, refreshToken, oidcLogout } from '../controllers/auth/signin.js';
-import { authLimiter, adminLimiter, standardLimiter } from './limiters.js';
+import { Router } from 'express';
+import {
+  verifySignUp,
+  authJwt,
+  oidcTokenRefresh,
+  verifyOrgAccess,
+  validateBody,
+} from '../middleware/index.js';
+import { signup } from '../controllers/auth/signup.js';
+import { signin } from '../controllers/auth/signin.js';
+import { verifyMail } from '../controllers/auth/verification.js';
+import { getActiveInvitations } from '../controllers/auth/invitation/get.js';
+import { sendInvitation } from '../controllers/auth/invitation/send.js';
+import { deleteInvitation } from '../controllers/auth/invitation/delete.js';
+import { acceptInvitation } from '../controllers/auth/invitation/accept.js';
+import { refreshToken } from '../controllers/auth/token.js';
+import { backchannelLogout } from '../controllers/auth/backchannelLogout.js';
+import { validateInvitationToken } from '../controllers/auth/invitation/validate.js';
+import { apiLimiter, authLimiter } from '../middleware/rateLimiter.js';
+import { buildAuthorizationUrl, handleOidcCallback, buildEndSessionUrl } from '../auth/passport.js';
+import jwt from 'jsonwebtoken';
+import { randomBytes } from 'crypto';
+import { randomState, randomPKCECodeVerifier } from 'openid-client';
+import { loadConfig, getOrigin, getSiteConfig } from '../utils/config-loader.js';
+import { getJwtClaimOptions } from '../utils/auth.js';
+import { log } from '../utils/Logger.js';
+import { problem } from '../utils/problem.js';
+import { connectHyperweaver } from '../utils/hyperweaverConnect.js';
+import db from '../models/index.js';
+
+const { invitation: Invitation, organization: Organization, user: User } = db;
+
+const invitationNotFound = (req, res) =>
+  problem(res, req, { status: 404, type: 'not-found', title: req.__('invitations.notFound') });
+
+const internal = (req, res, key) =>
+  problem(res, req, { status: 500, type: 'internal', title: req.__(key) });
 
 const router = Router();
 
-router.post('/auth/register', authLimiter, RegistrationController.register);
-router.post('/auth/signin', authLimiter, signin);
-router.post('/auth/oidc/exchange', authLimiter, exchange);
-router.post('/auth/refresh-token', authLimiter, authenticate, oidcTokenRefresh, refreshToken);
-router.post('/auth/oidc/logout', standardLimiter, optionalAuth, oidcLogout);
-router.post('/auth/ldap', authLimiter, LdapController.ldapLogin);
-router.get('/auth/oidc/callback', standardLimiter, OidcController.handleOidcCallback);
+/**
+ * Whether a hostname offers one sign-in method: every method while its sites
+ * entry names no sign_in list, exactly the listed ones otherwise, local for
+ * the username and password form and a provider key for that provider
+ * @param {string} hostname - The request's hostname
+ * @param {string} method - local, or a key of auth.oidc.providers
+ * @returns {boolean}
+ */
+const offersSignIn = (hostname, method) => {
+  const list = getSiteConfig(hostname)?.sign_in;
+  return !Array.isArray(list) || list.includes(method);
+};
+
+/**
+ * Whether a hostname offers one sign-in affordance: the site's own boolean
+ * when it names one, the auth-wide default otherwise, both true unless set
+ * false
+ * @param {string} hostname - The request's hostname
+ * @param {string} member - registration, password_reset or sign_in_link of a sites entry
+ * @param {*} fallback - The auth.local value the site falls back to
+ * @returns {boolean}
+ */
+const offersAffordance = (hostname, member, fallback) => {
+  const site = getSiteConfig(hostname)?.[member];
+  return typeof site === 'boolean' ? site : fallback !== false;
+};
+
+/**
+ * Refuse the username and password form on a hostname whose sites entry
+ * leaves local out of its sign_in list
+ * @param {import('express').Request} req - Express request
+ * @param {import('express').Response} res - Express response
+ * @param {import('express').NextFunction} next - Next handler
+ * @returns {*} The next handler's result, or the problem
+ */
+const requireLocalOffered = (req, res, next) => {
+  if (offersSignIn(req.hostname, 'local')) {
+    return next();
+  }
+  log.auth.info('Local sign-in refused on a hostname that does not offer it', {
+    hostname: req.hostname,
+    path: req.path,
+  });
+  return problem(res, req, {
+    status: 403,
+    type: 'forbidden',
+    title: req.__('auth.localAuthDisabled'),
+  });
+};
+
+// One-time login handoff codes (#15): after a successful OIDC callback the
+// signed BoxVault JWT is parked here behind an opaque, single-use, short-lived
+// code. The browser is redirected with only that code in the URL and swaps it
+// via POST /auth/oidc/exchange — the JWT itself never appears in a URL,
+// browser history, referrer header, or access log.
+const loginHandoffCodes = new Map();
+
+const purgeExpiredHandoffCodes = () => {
+  const now = Date.now();
+  for (const [code, entry] of loginHandoffCodes) {
+    if (entry.expiresAt <= now) {
+      loginHandoffCodes.delete(code);
+    }
+  }
+};
+
+const createLoginHandoffCode = token => {
+  purgeExpiredHandoffCodes();
+  const authConfig = loadConfig('auth');
+  const ttlSeconds = authConfig.auth?.oidc?.login_handoff_ttl_seconds || 60;
+  const code = randomBytes(32).toString('hex');
+  loginHandoffCodes.set(code, { token, expiresAt: Date.now() + ttlSeconds * 1000 });
+  return code;
+};
+
+const consumeLoginHandoffCode = code => {
+  purgeExpiredHandoffCodes();
+  if (typeof code !== 'string' || !code) {
+    return null;
+  }
+  const entry = loginHandoffCodes.get(code);
+  if (!entry) {
+    return null;
+  }
+  // Single-use: a code is dead the moment it is redeemed
+  loginHandoffCodes.delete(code);
+  return entry.token;
+};
+
+// Resolve the org that owns :invitationId so the per-org role gate can
+// authorize against THAT org — the delete route itself carries no org segment,
+// and the org must come from the invitation record, never from the caller.
+const resolveInvitationOrg = async (req, res, next) => {
+  try {
+    // External invites (customer orgs) are addressed as `ext:<org>:<invite_id>`
+    // — the record lives on the auth server, so the org rides in the id itself.
+    if (req.params.invitationId.startsWith('ext:')) {
+      const [, orgName] = req.params.invitationId.split(':');
+      if (!orgName) {
+        return invitationNotFound(req, res);
+      }
+      req.params.organization = orgName;
+      return next();
+    }
+
+    const invitation = await Invitation.findByPk(req.params.invitationId, {
+      include: [{ model: Organization, as: 'organization' }],
+    });
+
+    if (!invitation || !invitation.organization) {
+      return invitationNotFound(req, res);
+    }
+
+    req.params.organization = invitation.organization.name;
+    return next();
+  } catch (err) {
+    log.auth.error('Invitation org resolution error:', {
+      error: err.message,
+      invitationId: req.params.invitationId,
+    });
+    return internal(req, res, 'invitations.delete.error');
+  }
+};
+
+// Apply rate limiting to this router
+
+router.use((req, res, next) => {
+  void req;
+  res.header('Access-Control-Allow-Headers', 'x-access-token, Origin, Content-Type, Accept');
+  next();
+});
+
+/**
+ * Refuse account creation on a hostname whose sites entry sets registration
+ * false, or whose auth configuration switches creation off
+ * @param {import('express').Request} req - Express request
+ * @param {import('express').Response} res - Express response
+ * @param {import('express').NextFunction} next - Next handler
+ * @returns {*} The next handler's result, or the problem
+ */
+const requireRegistrationOffered = async (req, res, next) => {
+  const authConfig = loadConfig('auth');
+  const allowed = offersAffordance(
+    req.hostname,
+    'registration',
+    authConfig.auth?.local?.local_allow_registration
+  );
+  if (allowed || (await User.count()) === 0) {
+    return next();
+  }
+  log.auth.info('Account creation refused on a hostname that does not offer it', {
+    hostname: req.hostname,
+  });
+  return problem(res, req, {
+    status: 403,
+    type: 'forbidden',
+    title: req.__('auth.registrationDisabled'),
+  });
+};
+
 router.post(
-  '/auth/oidc/backchannel-logout',
-  standardLimiter,
-  urlencoded({ extended: false }),
-  OidcController.handleBackchannelLogout
-);
-router.get('/auth/oidc/issuers', standardLimiter, OidcController.getOidcIssuers);
-router.get('/auth/oidc/:provider', standardLimiter, OidcController.startOidcLogin);
-router.post('/auth/change-password', authLimiter, authenticate, AccountController.changePassword);
-router.delete(
-  '/auth/delete-account',
+  '/auth/signup',
   authLimiter,
-  authenticate,
-  UserManagementController.deleteSelfAccount
+  requireLocalOffered,
+  requireRegistrationOffered,
+  validateBody('register'),
+  verifySignUp.checkRolesExisted,
+  signup
 );
-router.get('/auth/setup-status', standardLimiter, RegistrationController.checkSetupStatus);
-router.get('/auth/methods', standardLimiter, AuthController.getAuthMethods);
+router.post('/auth/signin', authLimiter, requireLocalOffered, validateBody('login'), signin);
+router.get('/auth/verify-mail/:token', authLimiter, verifyMail);
+router.get('/auth/validate-invitation/:token', authLimiter, validateInvitationToken);
 router.post(
-  '/auth/ldap/test',
-  adminLimiter,
-  authenticate,
-  requireSuperAdmin,
-  LdapController.testLdap
+  '/auth/invitations/:token/accept',
+  apiLimiter,
+  authJwt.verifyToken,
+  authJwt.isUser,
+  acceptInvitation
 );
+// Invite management is gated per-org: the org's owners (UserOrg owner) and
+// admins (UserOrg admin) manage its invitations — global roles no
+// longer grant invite rights on other orgs (global admins still pass via the
+// bypass inside isOrgAdminOrOwner).
+router.get(
+  '/invitations/active/:organization',
+  apiLimiter,
+  oidcTokenRefresh,
+  authJwt.verifyToken,
+  authJwt.isUser,
+  verifyOrgAccess.isOrgAdminOrOwner,
+  getActiveInvitations
+);
+router.post(
+  '/auth/invite',
+  apiLimiter,
+  oidcTokenRefresh,
+  authJwt.verifyToken,
+  authJwt.isUser,
+  validateBody('invitation'),
+  // Resolves the org from req.body.organization_name (no :organization segment).
+  // Externally-managed orgs are NOT rejected here: the controller delegates
+  // their invites to the auth server instead of writing a local invitation.
+  verifyOrgAccess.isOrgAdminOrOwner,
+  sendInvitation
+);
+router.delete(
+  '/invitations/:invitationId',
+  apiLimiter,
+  oidcTokenRefresh,
+  authJwt.verifyToken,
+  authJwt.isUser,
+  resolveInvitationOrg,
+  verifyOrgAccess.isOrgAdminOrOwner,
+  deleteInvitation
+);
+
+// Token refresh endpoint - protected by verifyToken middleware
+router.post('/auth/refresh-token', apiLimiter, authJwt.verifyToken, oidcTokenRefresh, refreshToken);
+
+/**
+ * @swagger
+ * /api/auth/oidc/issuers:
+ *   get:
+ *     summary: Get trusted OIDC issuer URLs
+ *     description: Retrieve list of configured and enabled OIDC provider issuer URLs for client-side validation
+ *     tags: [Authentication]
+ *     responses:
+ *       200:
+ *         description: Trusted issuers retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 issuers:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       provider:
+ *                         type: string
+ *                         description: Provider name
+ *                         example: "google"
+ *                       issuer:
+ *                         type: string
+ *                         description: Trusted issuer URL
+ *                         example: "https://accounts.google.com"
+ *       500:
+ *         description: Internal server error
+ *         content:
+ *           application/problem+json:
+ *             schema:
+ *               $ref: '#/components/schemas/Problem'
+ */
+router.get('/auth/oidc/issuers', apiLimiter, (req, res) => {
+  try {
+    const authConfig = loadConfig('auth');
+    const trustedIssuers = [];
+
+    const oidcProvidersConfig = authConfig.auth?.oidc?.providers || {};
+
+    Object.entries(oidcProvidersConfig).forEach(([providerName, providerConfig]) => {
+      if (providerConfig.enabled === true && providerConfig.issuer) {
+        trustedIssuers.push({
+          provider: providerName,
+          issuer: providerConfig.issuer,
+        });
+      }
+    });
+
+    log.auth.debug('Trusted OIDC issuers', {
+      count: trustedIssuers.length,
+      issuers: trustedIssuers.map(t => t.issuer),
+    });
+
+    return res.json({ issuers: trustedIssuers });
+  } catch (error) {
+    log.auth.error('Get trusted issuers error', {
+      error: error.message,
+      stack: error.stack,
+    });
+    return internal(req, res, 'auth.issuersLoadError');
+  }
+});
+
+/**
+ * @swagger
+ * /api/auth/methods:
+ *   get:
+ *     summary: Get available authentication methods
+ *     description: Retrieve the enabled authentication methods for the login form, answered per Host header; a hostname whose sites entry names a sign_in list is answered exactly the listed methods, local disabled and the other providers left out, its default_provider the configured one while listed and the first listed provider otherwise. The three affordance booleans are the hostname's own registration, password_reset and sign_in_link when its sites entry names them, the auth.local defaults otherwise
+ *     tags: [Authentication]
+ *     responses:
+ *       200:
+ *         description: Authentication methods retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 methods:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id:
+ *                         type: string
+ *                         description: Method identifier
+ *                         example: "local"
+ *                       name:
+ *                         type: string
+ *                         description: Human-readable method name
+ *                         example: "Local Account"
+ *                       enabled:
+ *                         type: boolean
+ *                         description: Whether method is enabled
+ *                         example: true
+ *                       icon_url:
+ *                         type: string
+ *                         nullable: true
+ *                         description: Icon rendered on the provider's login button (OIDC methods only)
+ *                 default_provider:
+ *                   type: string
+ *                   nullable: true
+ *                   description: OIDC provider featured as the primary sign-in option
+ *                 silent_login:
+ *                   type: boolean
+ *                   description: Whether the login page attempts a silent sign-in with the default provider
+ *                 local_registration_enabled:
+ *                   type: boolean
+ *                   description: Whether a local account can be self-registered without an invitation
+ *                 password_reset_enabled:
+ *                   type: boolean
+ *                   description: Whether the sign-in page offers the forgot-password path
+ *                 sign_in_link_enabled:
+ *                   type: boolean
+ *                   description: Whether the sign-in page offers signing in by emailed link
+ *       500:
+ *         description: Internal server error
+ *         content:
+ *           application/problem+json:
+ *             schema:
+ *               $ref: '#/components/schemas/Problem'
+ */
+router.get('/auth/methods', apiLimiter, async (req, res) => {
+  try {
+    const authConfig = loadConfig('auth');
+    const localEnabled =
+      authConfig.auth?.jwt?.local_enabled !== false && offersSignIn(req.hostname, 'local');
+    const methods = [
+      {
+        id: 'local',
+        name: 'Local Account',
+        enabled: localEnabled,
+      },
+    ];
+
+    const oidcProvidersConfig = authConfig.auth?.oidc?.providers || {};
+    const offered = [];
+
+    Object.entries(oidcProvidersConfig).forEach(([providerName, providerConfig]) => {
+      if (
+        providerConfig.enabled === true &&
+        providerConfig.display_name &&
+        offersSignIn(req.hostname, providerName)
+      ) {
+        offered.push(providerName);
+        methods.push({
+          id: `oidc-${providerName}`,
+          name: providerConfig.display_name,
+          enabled: true,
+          icon_url: providerConfig.icon_url || null,
+        });
+      }
+    });
+
+    log.auth.debug('Available auth methods', {
+      hostname: req.hostname,
+      count: methods.length,
+      methods: methods.map(m => m.id),
+    });
+
+    const configuredDefault = authConfig.auth?.oidc?.default_provider || null;
+    const defaultProvider =
+      configuredDefault && offered.includes(configuredDefault)
+        ? configuredDefault
+        : offered[0] || null;
+    const silentLogin = !!authConfig.auth?.oidc?.silent_login;
+    const userCount = await User.count();
+    const localConfig = authConfig.auth?.local || {};
+    const registrationOffered = offersAffordance(
+      req.hostname,
+      'registration',
+      localConfig.local_allow_registration
+    );
+    const localRegistrationEnabled =
+      localEnabled &&
+      registrationOffered &&
+      (userCount === 0 || !!localConfig.local_allow_new_organizations);
+
+    return res.json({
+      methods,
+      default_provider: defaultProvider,
+      silent_login: silentLogin,
+      local_registration_enabled: localRegistrationEnabled,
+      password_reset_enabled: offersAffordance(
+        req.hostname,
+        'password_reset',
+        localConfig.local_allow_password_reset
+      ),
+      sign_in_link_enabled: offersAffordance(
+        req.hostname,
+        'sign_in_link',
+        localConfig.local_allow_sign_in_link
+      ),
+    });
+  } catch (error) {
+    log.auth.error('Get auth methods error', {
+      error: error.message,
+      stack: error.stack,
+    });
+    return internal(req, res, 'auth.methodsLoadError');
+  }
+});
+
+/**
+ * @swagger
+ * /api/auth/oidc/callback:
+ *   get:
+ *     summary: Handle OIDC callback from providers
+ *     description: >-
+ *       Process the callback from the OIDC provider, generate the BoxVault JWT
+ *       server-side, and redirect the browser with a single-use login code
+ *       redeemable at /api/auth/oidc/exchange (the JWT never appears in a URL)
+ *     tags: [Authentication]
+ *     parameters:
+ *       - in: query
+ *         name: code
+ *         schema:
+ *           type: string
+ *         description: Authorization code from OIDC provider
+ *       - in: query
+ *         name: state
+ *         schema:
+ *           type: string
+ *         description: State parameter for CSRF protection
+ *     responses:
+ *       302:
+ *         description: Redirect to frontend with a one-time login code or error
+ *       400:
+ *         description: OIDC provider not enabled or authentication failed
+ *       403:
+ *         description: Access denied - provisioning policy rejection
+ *       500:
+ *         description: Internal server error
+ */
+router.get('/auth/oidc/callback', authLimiter, async (req, res) => {
+  log.auth.info('OIDC callback received - ENHANCED', {
+    sessionId: req.sessionID,
+    hasSession: !!req.session,
+    sessionKeys: req.session ? Object.keys(req.session) : [],
+    cookies: req.headers.cookie ? 'present' : 'missing',
+    protocol: req.protocol,
+    secure: req.secure,
+    host: req.get('host'),
+    origin: req.get('origin'),
+    referer: req.get('referer'),
+  });
+
+  // Retrieve session data
+  const provider = req.session?.oidcProvider;
+  const state = req.session?.oidcState;
+  const codeVerifier = req.session?.oidcCodeVerifier;
+  const returnUrl = req.session?.oidcReturnUrl || '/';
+  const wasSilent = !!req.session?.oidcSilent;
+
+  log.auth.debug('OIDC callback session data', {
+    provider,
+    hasState: !!state,
+    hasCodeVerifier: !!codeVerifier,
+    returnUrl,
+    silent: wasSilent,
+    queryCode: req.query.code ? 'present' : 'missing',
+    queryState: req.query.state ? 'present' : 'missing',
+    stateMatch: req.query.state === state,
+  });
+
+  // Clean up session data
+  if (req.session) {
+    delete req.session.oidcProvider;
+    delete req.session.oidcState;
+    delete req.session.oidcCodeVerifier;
+    delete req.session.oidcReturnUrl;
+    delete req.session.oidcSilent;
+  }
+
+  if (req.query.error) {
+    log.auth.info('OIDC callback returned provider error', {
+      provider,
+      error: req.query.error,
+      silent: wasSilent,
+    });
+
+    if (wasSilent) {
+      return res.redirect('/login?silent=failed');
+    }
+    if (req.query.error === 'access_denied') {
+      return res.redirect('/login?error=access_denied');
+    }
+    return res.redirect('/login?error=oidc_failed');
+  }
+
+  if (!provider || !state || !codeVerifier) {
+    log.auth.error('Missing OIDC session data during callback', {
+      hasProvider: !!provider,
+      hasState: !!state,
+      hasCodeVerifier: !!codeVerifier,
+    });
+    return res.redirect('/?error=no_session_data');
+  }
+
+  try {
+    const authConfig = loadConfig('auth');
+
+    log.auth.info('Processing OIDC callback', { provider });
+
+    // CRITICAL FIX: Use req.originalUrl instead of req.url
+    // req.url doesn't include the /api/ prefix when route is mounted
+    const currentUrl = new URL(getOrigin(req.hostname) + req.originalUrl);
+
+    log.auth.debug('OIDC callback URL', {
+      currentUrl: currentUrl.toString(),
+      originalUrl: req.originalUrl,
+      url: req.url,
+      hasCode: !!req.query.code,
+      hasState: !!req.query.state,
+    });
+
+    // Handle the callback using helper function
+    const { user, tokens } = await handleOidcCallback(provider, currentUrl, state, codeVerifier);
+
+    if (!user) {
+      log.auth.error('OIDC callback: No user object returned', { provider });
+      return res.redirect('/?error=user_creation_failed');
+    }
+
+    // Suspended users may not log in — reject before any BoxVault JWT is issued
+    if (user.suspended) {
+      log.auth.info('OIDC callback: suspended user rejected', {
+        provider,
+        username: user.username,
+      });
+      return res.redirect('/login?error=account_suspended');
+    }
+
+    // Calculate OIDC token expiration time
+    const claims = tokens.claims();
+
+    const oidcConfig = authConfig.auth?.oidc;
+    const expiryValue = oidcConfig?.token_default_expiry_minutes;
+    const defaultExpiryMinutes = expiryValue || 30;
+
+    let oidcExpiresAt;
+    if (claims.exp) {
+      oidcExpiresAt = claims.exp * 1000;
+    } else {
+      oidcExpiresAt = Date.now() + defaultExpiryMinutes * 60 * 1000;
+    }
+
+    // Generate JWT token with id_token, access_token, and refresh_token for automatic token refresh
+    const token = jwt.sign(
+      {
+        id: user.id,
+        is_service_account: false,
+        provider: `oidc-${provider}`,
+        id_token: tokens.id_token, // Store for RP-initiated logout
+        oidc_access_token: tokens.access_token, // Store for auth server API calls (favorites, etc.)
+        oidc_refresh_token: tokens.refresh_token, // Store for automatic token refresh
+        oidc_expires_at: oidcExpiresAt, // Store expiration time for refresh check
+      },
+      authConfig.auth.jwt.jwt_secret,
+      {
+        algorithm: 'HS256',
+        expiresIn: authConfig.auth.jwt.jwt_expiration || '24h',
+        ...getJwtClaimOptions(),
+      }
+    );
+
+    // Set session data if using express-session
+    req.session.userId = user.id;
+    req.session.username = user.username;
+
+    connectHyperweaver({ provider, accessToken: tokens.access_token, hostname: req.hostname });
+
+    log.auth.info('OIDC login successful', {
+      provider,
+      username: user.username,
+      email: user.email,
+    });
+
+    // #15: the JWT never rides in a URL — hand the browser a single-use,
+    // short-lived opaque code and let the SPA swap it via POST /auth/oidc/exchange.
+    const handoffCode = createLoginHandoffCode(token);
+    return res.redirect(`/auth/callback?code=${handoffCode}`);
+  } catch (error) {
+    // Enhanced error logging with all available details
+    const safeParamLength = value => (typeof value === 'string' ? value.length : undefined);
+
+    log.auth.error('OIDC callback error - DETAILED', {
+      provider,
+      errorName: error.name,
+      errorMessage: error.message,
+      errorCode: error.code,
+      errorType: error.constructor.name,
+      errorDetails: error.error,
+      errorDescription: error.error_description,
+      stack: error.stack,
+      // Session debugging
+      sessionPresent: !!req.session,
+      sessionId: req.sessionID,
+      // Request details
+      queryParams: {
+        hasCode: !!req.query.code,
+        hasState: !!req.query.state,
+        codeLength: safeParamLength(req.query.code),
+        stateLength: safeParamLength(req.query.state),
+      },
+    });
+
+    // Handle specific error cases
+    if (error.message.includes('Access denied')) {
+      return res.redirect('/?error=access_denied');
+    }
+
+    return res.redirect('/?error=oidc_failed');
+  }
+});
+
+/**
+ * @swagger
+ * /api/auth/oidc/exchange:
+ *   post:
+ *     summary: Exchange a one-time login code for the session JWT
+ *     description: >-
+ *       Redeems the single-use, short-lived code issued by the OIDC callback
+ *       redirect for the BoxVault JWT. Each code works exactly once and expires
+ *       after the configured TTL.
+ *     tags: [Authentication]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - code
+ *             properties:
+ *               code:
+ *                 type: string
+ *                 description: One-time login code from the callback redirect
+ *     responses:
+ *       200:
+ *         description: Code redeemed successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 token:
+ *                   type: string
+ *                   description: BoxVault JWT access token
+ *       400:
+ *         description: Invalid, expired, or already-used login code
+ *         content:
+ *           application/problem+json:
+ *             schema:
+ *               $ref: '#/components/schemas/Problem'
+ */
+router.post('/auth/oidc/exchange', authLimiter, (req, res) => {
+  const { code } = req.body || {};
+  const token = consumeLoginHandoffCode(code);
+
+  if (!token) {
+    log.auth.info('Login handoff exchange rejected', { hasCode: !!code });
+    return problem(res, req, {
+      status: 400,
+      type: 'bad-request',
+      title: req.__('auth.invalidLoginCode'),
+    });
+  }
+
+  return res.json({ token });
+});
+
+router.post('/auth/oidc/backchannel-logout', apiLimiter, backchannelLogout);
+
+/**
+ * @swagger
+ * /api/auth/oidc/{provider}:
+ *   get:
+ *     summary: Initiate OIDC authentication for specific provider
+ *     description: Redirect user to specific OIDC provider for authentication; a provider left out of the hostname's sign_in list is answered as not enabled
+ *     tags: [Authentication]
+ *     parameters:
+ *       - in: path
+ *         name: provider
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: OIDC provider name
+ *         example: "google"
+ *     responses:
+ *       302:
+ *         description: Redirect to OIDC provider
+ *       400:
+ *         description: OIDC provider not enabled or not found
+ *       500:
+ *         description: Internal server error
+ */
+router.get('/auth/oidc/:provider', authLimiter, async (req, res) => {
+  const { provider } = req.params;
+
+  try {
+    log.auth.info('OIDC authentication request', { provider });
+
+    const authConfig = loadConfig('auth');
+
+    // Validate provider exists and is enabled
+    const providerConfig = authConfig.auth?.oidc?.providers?.[provider];
+    if (!providerConfig) {
+      log.auth.error('OIDC provider not found', { provider });
+      return res.redirect('/?error=provider_not_found');
+    }
+
+    if (providerConfig.enabled !== true || !offersSignIn(req.hostname, provider)) {
+      log.auth.error('OIDC provider not enabled', { provider, hostname: req.hostname });
+      return res.redirect('/?error=provider_not_enabled');
+    }
+
+    // Generate security parameters (PKCE + state)
+    const state = randomState();
+    const codeVerifier = randomPKCECodeVerifier();
+    const returnUrl = req.query.return || '/';
+    const promptOverride = req.query.prompt === 'none' ? 'none' : null;
+
+    log.auth.debug('Generated OIDC security parameters', {
+      provider,
+      hasState: !!state,
+      hasCodeVerifier: !!codeVerifier,
+      returnUrl,
+      silent: !!promptOverride,
+    });
+
+    req.session.oidcProvider = provider;
+    req.session.oidcState = state;
+    req.session.oidcCodeVerifier = codeVerifier;
+    req.session.oidcReturnUrl = returnUrl;
+    req.session.oidcSilent = !!promptOverride;
+
+    log.auth.debug('Stored OIDC session data', {
+      provider,
+      sessionId: req.sessionID,
+    });
+
+    // Generate authorization URL
+    const redirectUri = `${getOrigin(req.hostname)}/api/auth/oidc/callback`;
+    const authUrl = await buildAuthorizationUrl(
+      provider,
+      redirectUri,
+      state,
+      codeVerifier,
+      promptOverride
+    );
+
+    log.auth.info('Redirecting to OIDC provider', {
+      provider,
+      authUrl: `${authUrl.toString().substring(0, 100)}...`,
+    });
+
+    // Explicitly save session before redirect to ensure data persists
+    await new Promise(resolve => {
+      req.session.save(err => {
+        if (err) {
+          log.auth.error('Failed to save session before OIDC redirect', { error: err.message });
+        }
+        resolve();
+      });
+    });
+
+    return res.redirect(authUrl.toString());
+  } catch (error) {
+    log.auth.error('OIDC start error', {
+      provider: req.params.provider,
+      error: error.message,
+      stack: error.stack,
+    });
+    return res.redirect('/?error=oidc_failed');
+  }
+});
+
+/**
+ * @swagger
+ * /api/auth/oidc/logout:
+ *   post:
+ *     summary: OIDC logout with RP-initiated logout support
+ *     description: Logout user and optionally redirect to OIDC provider logout endpoint
+ *     tags: [Authentication]
+ *     security:
+ *       - JwtAuth: []
+ *     responses:
+ *       200:
+ *         description: Logout processed
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Logout initiated"
+ *                 redirect_url:
+ *                   type: string
+ *                   description: OIDC provider logout URL (if RP-initiated logout supported)
+ *                   example: "https://accounts.google.com/logout?..."
+ *       500:
+ *         description: Internal server error
+ */
+router.post('/auth/oidc/logout', apiLimiter, (req, res) => {
+  const token = req.headers['x-access-token'];
+
+  if (!token) {
+    log.auth.info('OIDC logout: No token provided');
+    return res.json({
+      success: true,
+      message: 'No active session to logout',
+    });
+  }
+
+  try {
+    const authConfig = loadConfig('auth');
+
+    // Verify and decode token
+    const decoded = jwt.verify(token, authConfig.auth.jwt.jwt_secret, getJwtClaimOptions());
+
+    log.auth.info('OIDC logout request', {
+      userId: decoded.id,
+      provider: decoded.provider,
+    });
+
+    // Check if this is an OIDC-authenticated user
+    if (decoded.provider?.startsWith('oidc-')) {
+      const providerName = decoded.provider.replace('oidc-', '');
+      const state = randomState();
+      const postLogoutRedirectUri = `${getOrigin(req.hostname)}/login?logout=success`;
+
+      log.auth.info('Attempting RP-initiated logout', {
+        provider: providerName,
+        postLogoutRedirectUri,
+      });
+
+      // Build end session URL for RP-initiated logout
+      const endSessionUrl = buildEndSessionUrl(
+        providerName,
+        postLogoutRedirectUri,
+        state,
+        decoded.id_token
+      );
+
+      if (endSessionUrl) {
+        log.auth.info('RP-initiated logout URL generated', {
+          provider: providerName,
+          url: `${endSessionUrl.toString().substring(0, 100)}...`,
+        });
+
+        return res.json({
+          success: true,
+          message: 'Logout initiated',
+          redirect_url: endSessionUrl.toString(),
+        });
+      }
+
+      log.auth.info('Provider does not support RP-initiated logout, local logout only', {
+        provider: providerName,
+      });
+    }
+
+    // Local logout only (provider doesn't support RP-initiated logout or not OIDC)
+    return res.json({
+      success: true,
+      message: 'Logged out locally',
+    });
+  } catch (error) {
+    log.auth.error('OIDC logout error', {
+      error: error.message,
+      stack: error.stack,
+    });
+
+    // Even on error, allow local logout
+    return res.json({
+      success: true,
+      message: 'Logged out locally',
+    });
+  }
+});
+
+/**
+ * @swagger
+ * /api/auth/oidc/logout/local:
+ *   post:
+ *     summary: Local-only logout
+ *     description: Logout from BoxVault without triggering OIDC provider logout
+ *     tags: [Authentication]
+ *     responses:
+ *       200:
+ *         description: Local logout successful
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Logged out locally"
+ *       500:
+ *         description: Internal server error
+ */
+router.post('/auth/oidc/logout/local', apiLimiter, (req, res) => {
+  void req;
+  log.auth.info('Local-only logout requested');
+  return res.json({
+    success: true,
+    message: 'Logged out locally',
+  });
+});
 
 export default router;

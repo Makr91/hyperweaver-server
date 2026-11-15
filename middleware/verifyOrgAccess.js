@@ -1,0 +1,350 @@
+import db from '../models/index.js';
+import { log } from '../utils/Logger.js';
+import { problem } from '../utils/problem.js';
+import {
+  canWriteInOrg,
+  holdsGlobalAdmin,
+  resolveOrgMembership,
+  serviceAccountIsSuperadmin,
+} from '../utils/orgMembership.js';
+const { user: User, organization: Organization, UserOrg } = db;
+
+const MANAGING_ROLES = ['admin', 'owner'];
+
+const parameterRequired = (req, res) =>
+  problem(res, req, {
+    status: 400,
+    type: 'bad-request',
+    title: req.__('organizations.parameterRequired'),
+  });
+
+const userNotFound = (req, res) =>
+  problem(res, req, {
+    status: 401,
+    type: 'authentication',
+    title: req.__('users.userNotFound'),
+  });
+
+const forbidden = (req, res, key) =>
+  problem(res, req, { status: 403, type: 'forbidden', title: req.__(key) });
+
+const notFound = (req, res, title) => problem(res, req, { status: 404, type: 'not-found', title });
+
+const internal = (req, res, key) =>
+  problem(res, req, { status: 500, type: 'internal', title: req.__(key) });
+
+/**
+ * Whether the caller acts as a global admin: a user holding ROLE_ADMIN, or a
+ * live superadmin service account; any other service account never does,
+ * whatever its owner's global role.
+ * @param {import('express').Request} req - The request
+ * @param {Object} user - The requesting user
+ * @returns {Promise<boolean>} True for a global admin
+ */
+const isGlobalAdmin = (req, user) =>
+  req.isServiceAccount ? serviceAccountIsSuperadmin(req.serviceAccountId) : holdsGlobalAdmin(user);
+
+/**
+ * Middleware to verify user has membership in the organization specified in route
+ */
+const isOrgMember = async (req, res, next) => {
+  try {
+    const { organization: orgName } = req.params;
+
+    if (!orgName) {
+      return parameterRequired(req, res);
+    }
+
+    const user = await User.findByPk(req.userId);
+    if (!user) {
+      return userNotFound(req, res);
+    }
+
+    const organization = await Organization.findOne({ where: { name: orgName } });
+    if (!organization) {
+      return notFound(req, res, req.__('organizations.organizationNotFound'));
+    }
+
+    const membership = await resolveOrgMembership(req, organization.id);
+    if (!membership) {
+      return forbidden(req, res, 'organizations.userNotMember');
+    }
+
+    // Attach org context to request for use in controllers
+    req.userOrgRole = membership.role;
+    req.organizationId = organization.id;
+
+    return next();
+  } catch (err) {
+    log.error.error('Org membership check error:', {
+      error: err.message,
+      stack: err.stack,
+      userId: req.userId,
+      organization: req.params.organization,
+    });
+    return internal(req, res, 'organizations.membershipCheckError');
+  }
+};
+
+/**
+ * Middleware to verify the caller holds a writing membership in the
+ * organization named by the route: member, admin or owner; a guest is refused.
+ */
+const isOrgWriter = async (req, res, next) => {
+  try {
+    const { organization: orgName } = req.params;
+
+    if (!orgName) {
+      return parameterRequired(req, res);
+    }
+
+    const user = await User.findByPk(req.userId);
+    if (!user) {
+      return userNotFound(req, res);
+    }
+
+    const organization = await Organization.findOne({ where: { name: orgName } });
+    if (!organization) {
+      return notFound(req, res, req.__('organizations.organizationNotFound'));
+    }
+
+    const membership = await resolveOrgMembership(req, organization.id);
+    if (!membership) {
+      return forbidden(req, res, 'organizations.userNotMember');
+    }
+    if (!canWriteInOrg(membership)) {
+      return forbidden(req, res, 'organizations.requireWriter');
+    }
+
+    req.userOrgRole = membership.role;
+    req.organizationId = organization.id;
+
+    return next();
+  } catch (err) {
+    log.error.error('Org writer check error:', {
+      error: err.message,
+      stack: err.stack,
+      userId: req.userId,
+      organization: req.params.organization,
+    });
+    return internal(req, res, 'organizations.membershipCheckError');
+  }
+};
+
+/**
+ * Middleware to verify user has admin or owner role in organization
+ */
+const isOrgAdmin = async (req, res, next) => {
+  try {
+    const { organization: orgName } = req.params;
+
+    if (!orgName) {
+      return parameterRequired(req, res);
+    }
+
+    const user = await User.findByPk(req.userId);
+    if (!user) {
+      return userNotFound(req, res);
+    }
+
+    const organization = await Organization.findOne({ where: { name: orgName } });
+    if (!organization) {
+      return notFound(req, res, req.__('organizations.organizationNotFound'));
+    }
+
+    if (await isGlobalAdmin(req, user)) {
+      req.organizationId = organization.id;
+      req.userOrgRole = 'owner';
+      return next();
+    }
+
+    const membership = await resolveOrgMembership(req, organization.id);
+    if (!membership || !MANAGING_ROLES.includes(membership.role)) {
+      return forbidden(req, res, 'organizations.requireAdminOrOwner');
+    }
+
+    req.organizationId = organization.id;
+    req.userOrgRole = membership.role;
+
+    return next();
+  } catch (err) {
+    log.error.error('Org admin check error:', {
+      error: err.message,
+      stack: err.stack,
+      userId: req.userId,
+      organization: req.params.organization,
+    });
+    return internal(req, res, 'organizations.permissionCheckError');
+  }
+};
+
+/**
+ * Middleware to verify user has owner role in organization
+ */
+const isOrgOwner = async (req, res, next) => {
+  try {
+    const { organization: orgName } = req.params;
+
+    if (!orgName) {
+      return parameterRequired(req, res);
+    }
+
+    const user = await User.findByPk(req.userId);
+    if (!user) {
+      return userNotFound(req, res);
+    }
+
+    const organization = await Organization.findOne({ where: { name: orgName } });
+    if (!organization) {
+      return notFound(req, res, req.__('organizations.organizationNotFound'));
+    }
+
+    if (await isGlobalAdmin(req, user)) {
+      req.organizationId = organization.id;
+      req.userOrgRole = 'owner';
+      return next();
+    }
+
+    const membership = await resolveOrgMembership(req, organization.id);
+    if (!membership || membership.role !== 'owner') {
+      return forbidden(req, res, 'organizations.requireOwner');
+    }
+
+    req.organizationId = organization.id;
+    req.userOrgRole = membership.role;
+
+    return next();
+  } catch (err) {
+    log.error.error('Org owner check error:', {
+      error: err.message,
+      stack: err.stack,
+      userId: req.userId,
+      organization: req.params.organization,
+    });
+    return internal(req, res, 'organizations.permissionCheckError');
+  }
+};
+
+/**
+ * Middleware to verify user has admin or owner role in organization.
+ * Resolves the org from req.params.organization or req.body.organization_name
+ * (same resolution as rejectExternallyManagedOrg) so body-driven routes like
+ * POST /auth/invite can be gated per-org too.
+ */
+const isOrgAdminOrOwner = async (req, res, next) => {
+  try {
+    const orgName = req.params.organization || req.body?.organization_name;
+
+    if (!orgName) {
+      return parameterRequired(req, res);
+    }
+
+    const user = await User.findByPk(req.userId);
+    if (!user) {
+      return userNotFound(req, res);
+    }
+
+    const organization = await Organization.findOne({ where: { name: orgName } });
+    if (!organization) {
+      return notFound(req, res, req.__('organizations.organizationNotFound'));
+    }
+
+    if (await isGlobalAdmin(req, user)) {
+      req.organizationId = organization.id;
+      req.userOrgRole = 'owner';
+      return next();
+    }
+
+    const membership = await resolveOrgMembership(req, organization.id);
+    if (!membership || !MANAGING_ROLES.includes(membership.role)) {
+      return forbidden(req, res, 'organizations.requireAdminOrOwner');
+    }
+
+    req.organizationId = organization.id;
+    req.userOrgRole = membership.role;
+
+    return next();
+  } catch (err) {
+    log.error.error('Org admin/owner check error:', {
+      error: err.message,
+      stack: err.stack,
+      userId: req.userId,
+      organization: req.params.organization,
+    });
+    return internal(req, res, 'organizations.permissionCheckError');
+  }
+};
+
+/**
+ * Middleware to reject membership/lifecycle writes on externally-managed orgs.
+ *
+ * Orgs with external_issuer set are mirrors of an OIDC provider's orgs: their
+ * membership, roles, and lifecycle are managed on the auth-server and re-synced
+ * on every login — local writes would be silently overwritten. Local orgs
+ * (external_issuer null) are unaffected.
+ *
+ * Resolves the org from req.params.organization or req.body.organization_name.
+ * Falls through when the org doesn't exist (later middleware handles 404).
+ */
+const rejectExternallyManagedOrg = async (req, res, next) => {
+  try {
+    const orgName = req.params.organization || req.body?.organization_name;
+
+    const organization = await Organization.findOne({ where: { name: orgName } });
+    if (!organization) {
+      return next();
+    }
+
+    if (organization.external_issuer) {
+      return forbidden(req, res, 'organizations.externallyManaged');
+    }
+
+    return next();
+  } catch (err) {
+    log.error.error('External-org write guard error:', {
+      error: err.message,
+      stack: err.stack,
+      organization: req.params.organization || req.body?.organization_name,
+    });
+    return internal(req, res, 'organizations.managementCheckError');
+  }
+};
+
+/**
+ * Helper function to get user's role in organization (for controllers)
+ * @param {number} userId - User ID
+ * @param {string} orgName - Organization name
+ * @returns {Promise<{role: string, organizationId: number}|null>}
+ */
+const getUserOrgContext = async (userId, orgName) => {
+  try {
+    const organization = await Organization.findOne({ where: { name: orgName } });
+    if (!organization) {
+      return null;
+    }
+
+    const membership = await UserOrg.findUserOrgRole(userId, organization.id);
+    if (!membership) {
+      return null;
+    }
+
+    return {
+      role: membership.role,
+      organizationId: organization.id,
+      organization,
+    };
+  } catch (error) {
+    log.error.error('Error getting user org context:', error);
+    return null;
+  }
+};
+
+export {
+  isOrgMember,
+  isOrgWriter,
+  isOrgAdmin,
+  isOrgOwner,
+  isOrgAdminOrOwner,
+  rejectExternallyManagedOrg,
+  getUserOrgContext,
+};

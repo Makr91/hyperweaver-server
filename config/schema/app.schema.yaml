@@ -58,6 +58,19 @@ properties:
         restartReason: the Express trust proxy setting is applied at boot
     required:
       - frontend_url
+  organizations:
+    type: object
+    section: application
+    subsection: organizations
+    title: Organizations
+    properties:
+      org_code_seed:
+        type: string
+        pattern: '^[0-9A-F]{6}$'
+        default: B00000
+        title: Organization code seed
+        description: Starting point, inclusive, for the sequential organization codes of locally created organizations
+        order: 1
   branding:
     type: object
     section: application
@@ -476,6 +489,24 @@ properties:
         title: Status probe timeout (ms)
         description: How long a status probe of an agent waits before it fails
         order: 1
+  updates:
+    type: object
+    section: application
+    subsection: updates
+    title: Updates
+    properties:
+      repository_packages_url:
+        type: string
+        default: https://debian.startcloud.com/dists/stable/main/binary-amd64/Packages
+        title: Repository Packages URL
+        description: Direct URL to the Packages file of the Debian repository for update checks; empty reads apt-cache alone
+        order: 1
+      versioninfo_url:
+        type: string
+        default: https://github.com/Makr91/hyperweaver-server/releases/latest/download/update-info.json
+        title: Version document URL
+        description: JSON document with version, releaseUrl, releaseDate, changelog, releaseNotes, linuxUrl and checksumsUrl, published with every release; the update check reads the release's date, notes and files from it; empty reads none
+        order: 2
   integrations:
     type: object
     section: integrations
@@ -491,17 +522,26 @@ properties:
             title: BoxVault URL
             description: Base URL of the BoxVault instance; requests to /api/boxvault/* are forwarded there with the signed-in person's own token; empty disables the proxy
             order: 1
-      gravatar:
-        type: object
-        subsection: gravatar
-        title: Gravatar
-        properties:
-          api_key:
-            type: string
-            writeOnly: true
-            default: ''
-            title: Gravatar API key
-            order: 1
+  gravatar:
+    type: object
+    section: integrations
+    subsection: gravatarSettings
+    title: Gravatar Settings
+    properties:
+      base_url:
+        type: string
+        format: uri
+        default: https://api.gravatar.com/v3/profiles/
+        title: Gravatar base URL
+        description: The base URL of the Gravatar profile API
+        order: 1
+      api_key:
+        type: string
+        writeOnly: true
+        default: ''
+        title: Gravatar API key
+        description: API key sent to Gravatar by the server-side profile proxy
+        order: 2
   ticket_system:
     type: object
     section: integrations

@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { loadConfig } from '../utils/config.js';
+import { loadConfig } from '../utils/config-loader.js';
 import { log } from '../utils/Logger.js';
 import { extractOidcAccessToken } from './favorites/helpers.js';
 
@@ -33,7 +33,7 @@ import { extractOidcAccessToken } from './favorites/helpers.js';
  */
 export const proxyToBoxVault = async (req, res) => {
   try {
-    const config = loadConfig();
+    const config = loadConfig('app');
     const baseUrl = config.integrations?.boxvault?.url;
     if (!baseUrl) {
       return res.status(503).json({

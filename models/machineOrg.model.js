@@ -1,43 +1,41 @@
-import { DataTypes } from '@sequelize/core';
-
 /**
  * MachineOrg Model — which org(s) a machine on an agent belongs to. Junction shape: a
  * machine may carry multiple org rows (single-org today, multi-org deliberately not
  * ruled out). Machines are identified by their agent-canonical name within a server.
  * A machine with NO rows is visible only to the agent's owning orgs.
  */
-export default sequelize => {
+export default (sequelize, Sequelize) => {
   const MachineOrg = sequelize.define(
     'machine_orgs',
     {
       id: {
-        type: DataTypes.INTEGER,
+        type: Sequelize.INTEGER,
         primaryKey: true,
         autoIncrement: true,
       },
       server_id: {
-        type: DataTypes.INTEGER,
+        type: Sequelize.INTEGER,
         allowNull: false,
-        columnName: 'server_id',
+        field: 'server_id',
         references: {
-          table: 'servers',
+          model: 'servers',
           key: 'id',
         },
         onUpdate: 'CASCADE',
         onDelete: 'CASCADE',
       },
       machine_name: {
-        type: DataTypes.STRING(255),
+        type: Sequelize.STRING(255),
         allowNull: false,
-        columnName: 'machine_name',
+        field: 'machine_name',
         validate: {
           notEmpty: true,
         },
       },
       org_uuid: {
-        type: DataTypes.STRING(36),
+        type: Sequelize.STRING(36),
         allowNull: false,
-        columnName: 'org_uuid',
+        field: 'org_uuid',
         validate: {
           notEmpty: true,
         },
@@ -64,7 +62,8 @@ export default sequelize => {
 
   MachineOrg.associate = function (models) {
     MachineOrg.belongsTo(models.server, {
-      foreignKey: { name: 'server_id', onDelete: 'CASCADE' },
+      foreignKey: 'server_id',
+      onDelete: 'CASCADE',
       as: 'server',
     });
   };

@@ -1,26 +1,16 @@
-import { randomBytes } from 'crypto';
-import db from '../../models/index.js';
+// signin.js
+import { compareSync } from 'bcryptjs';
+import jwt from 'jsonwebtoken';
+import { loadConfig } from '../../utils/config-loader.js';
+import { getJwtClaimOptions } from '../../utils/auth.js';
+import { hashServiceAccountToken, touchServiceAccount } from '../../utils/serviceAccountAuth.js';
+import { membershipOf, resolveUserOrganizations } from '../../utils/userOrgs.js';
+import { serviceAccountMembership } from '../../utils/orgMembership.js';
 import { log } from '../../utils/Logger.js';
 import { problem } from '../../utils/problem.js';
-import { signSessionToken } from '../../utils/auth.js';
-import { loadConfig } from '../../utils/config-loader.js';
-import { profileOf } from '../user/getuserprofile.js';
-import { buildRpLogoutUrl, revokeOidcGrant } from '../../auth/oidcLogout.js';
-import { notifySessionTerminated } from '../../utils/events.js';
-
-const { user: UserModel } = db;
-
-const CODE_TTL_MS = 60 * 1000;
-const codes = new Map();
-
-const purgeCodes = () => {
-  const now = Date.now();
-  for (const [code, entry] of codes) {
-    if (entry.expiresAt <= now) {
-      codes.delete(code);
-    }
-  }
-};
+import { hostRoleOf } from '../../utils/hostRole.js';
+import db from '../../models/index.js';
+const { user: User, role: Role, organization: Organization, service_account: ServiceAccount } = db;
 
 const unauthenticated = (req, res, key) =>
   problem(res, req, { status: 401, type: 'authentication', title: req.__(key) });
@@ -28,72 +18,175 @@ const unauthenticated = (req, res, key) =>
 const forbidden = (req, res, key) =>
   problem(res, req, { status: 403, type: 'forbidden', title: req.__(key) });
 
+const SIGNIN_INCLUDE = [
+  {
+    model: Role,
+    as: 'roles',
+    attributes: ['name'],
+    through: { attributes: [] },
+  },
+  {
+    model: Organization,
+    as: 'primaryOrganization',
+    attributes: ['name'],
+  },
+];
+
 /**
- * Mint the session JWT of a user: the claims every reader of the token
- * expects and the provider tag the UI reads as `provider`.
- * @param {Object} user - The user row
- * @param {string} provider - `local`, `ldap` or `oidc-<name>`
- * @param {boolean} stayLoggedIn - Whether the UI keeps the session across restarts
- * @returns {string} The JWT
+ * Look up a regular user for signin, with roles and primary organization:
+ * by username first, then by email address.
+ * @param {string} identifier - Presented username or email address
+ * @returns {Promise<Object|null>} User instance or null
  */
-export const mintSession = (user, provider, stayLoggedIn) =>
-  signSessionToken({
-    userId: user.id,
-    username: user.username,
-    email: user.email,
-    role: user.role,
-    auth_provider: provider,
-    provider,
-    stay_logged_in: Boolean(stayLoggedIn),
+const findSigninUser = async identifier =>
+  (await User.findOne({ where: { username: identifier }, include: SIGNIN_INCLUDE })) ||
+  User.findOne({ where: { email: identifier }, include: SIGNIN_INCLUDE });
+
+/**
+ * Look up a service account for signin (tokens are stored as sha256 hashes —
+ * hash the presented token before comparing).
+ * @param {string} username - Presented username
+ * @param {string} password - Presented raw token
+ * @returns {Promise<Object|null>} Service account instance or null
+ */
+const findSigninServiceAccount = (username, password) =>
+  ServiceAccount.findOne({
+    where: { username, token: hashServiceAccountToken(password || '') },
+    include: [
+      {
+        model: Organization,
+        as: 'organization',
+        attributes: ['id', 'uuid', 'name', 'display_name', 'personal', 'logo', 'emailHash'],
+      },
+      {
+        model: User,
+        as: 'user',
+        attributes: ['id', 'username', 'suspended'],
+      },
+    ],
   });
 
 /**
- * The sign-in answer: the profile of `GET /api/user` with the JWT as
- * `access_token`, `provider` and `stay_logged_in` beside it.
- * @param {Object} user - The user row, its organization association loaded
- * @param {import('express').Request} req - The request
- * @param {string} provider - The provider tag
- * @param {boolean} stayLoggedIn - Whether the session is kept
- * @returns {Promise<Object>} The answer body
+ * Run the local-account signin gates in order; returns the rejection to send,
+ * or null when the signin may proceed.
+ * @param {Object} user - User instance
+ * @param {string} password - Presented password
+ * @param {Object} authConfig - Loaded auth config
+ * @param {Object} req - Express request (for i18n)
+ * @returns {{status: number, type: string, title: string}|null}
  */
-export const signinAnswer = async (user, req, provider, stayLoggedIn) => ({
-  ...(await profileOf(user, req)),
-  access_token: mintSession(user, provider, stayLoggedIn),
-  is_service_account: false,
-  provider,
-  stay_logged_in: Boolean(stayLoggedIn),
-});
+const getLocalSigninRejection = (user, password, authConfig, req) => {
+  // Username/password authentication can be switched off entirely (#18)
+  if (authConfig.auth?.jwt?.local_enabled === false) {
+    return { status: 403, type: 'forbidden', title: req.__('auth.localAuthDisabled') };
+  }
 
-/**
- * Park a signed-in user behind a single-use code the OIDC callback lands the
- * browser with, redeemed once by `POST /api/auth/oidc/exchange`.
- * @param {number} userId - The user
- * @param {string} provider - The provider tag
- * @returns {string} The code
- */
-export const issueLoginCode = (userId, provider) => {
-  purgeCodes();
-  const code = randomBytes(32).toString('hex');
-  codes.set(code, { userId, provider, expiresAt: Date.now() + CODE_TTL_MS });
-  return code;
+  const passwordIsValid = Boolean(user.password) && compareSync(password, user.password);
+  if (!passwordIsValid) {
+    return { status: 401, type: 'authentication', title: req.__('auth.invalidCredentials') };
+  }
+
+  // Checked after password verification so suspension status is only
+  // revealed to the account holder.
+  if (user.suspended) {
+    return { status: 403, type: 'forbidden', title: req.__('auth.accountSuspended') };
+  }
+
+  // Email-verification enforcement for local accounts (#18): when the knob
+  // is on, unverified accounts may not sign in. Checked after password
+  // verification so the status is only revealed to the account holder.
+  if (authConfig.auth?.local?.local_require_email_verification && !user.verified) {
+    return { status: 403, type: 'forbidden', title: req.__('auth.emailNotVerified') };
+  }
+
+  return null;
 };
 
-const loadUser = id =>
-  UserModel.findByPk(id, {
-    include: [{ association: 'organization', attributes: ['id', 'name', 'org_uuid'] }],
-  });
+/**
+ * Resolve the organizations to embed in the signin response/JWT: a user's
+ * memberships, or a service account's one organization at its effective role
+ * as its primary one, none once that role is gone or the account has no
+ * organization.
+ * @param {Object} user - User or service-account instance
+ * @param {boolean} isServiceAccount
+ * @returns {Promise<{userOrganizations: Object[], primaryOrgName: string|null}>}
+ */
+const resolveSigninOrganizations = async (user, isServiceAccount) => {
+  if (!isServiceAccount) {
+    return resolveUserOrganizations(user);
+  }
+  const { organization } = user;
+  if (!organization) {
+    return { userOrganizations: [], primaryOrgName: null };
+  }
+  const membership = await serviceAccountMembership(user);
+  return {
+    userOrganizations: membership ? [membershipOf(organization, membership.role, true)] : [],
+    primaryOrgName: organization.name,
+  };
+};
 
-const regenerate = req =>
-  new Promise((resolve, reject) => {
-    req.session.regenerate(err => (err ? reject(err) : resolve()));
-  });
+/**
+ * Provider tag stamped on the token and response.
+ * @param {Object} user - User or service-account instance
+ * @param {boolean} isServiceAccount
+ * @returns {string}
+ */
+const resolveSigninProvider = (user, isServiceAccount) => {
+  if (isServiceAccount) {
+    return 'service_account';
+  }
+  return user.authProvider || 'local';
+};
+
+/**
+ * Sign the BoxVault session JWT for a successful signin.
+ * @param {Object} params - { user, isServiceAccount, stayLoggedIn, provider,
+ *   userOrganizations, authConfig, idpClaims }; idpClaims carries the
+ *   identity-provider fields of an OIDC session forward, none for a local one
+ * @returns {string} Signed JWT
+ */
+export const buildSigninToken = ({
+  user,
+  isServiceAccount,
+  stayLoggedIn,
+  provider,
+  userOrganizations,
+  authConfig,
+  idpClaims = {},
+}) => {
+  // Use the configured session timeout for stayLoggedIn sessions (#18:
+  // auth.local.local_session_timeout, hours), default expiry otherwise.
+  const sessionTimeoutHours = authConfig.auth?.local?.local_session_timeout || 24;
+  const tokenExpiry = stayLoggedIn
+    ? `${sessionTimeoutHours}h`
+    : authConfig.auth.jwt.jwt_expiration || '24h';
+
+  return jwt.sign(
+    {
+      id: isServiceAccount ? user.userId : user.id, // For service accounts, use creator's user ID
+      service_account_id: isServiceAccount ? user.id : null, // Store service account's own ID
+      is_service_account: isServiceAccount,
+      stay_logged_in: stayLoggedIn,
+      provider,
+      organizations: userOrganizations, // Multi-org data for frontend
+      ...idpClaims,
+    },
+    authConfig.auth.jwt.jwt_secret,
+    {
+      algorithm: 'HS256',
+      expiresIn: tokenExpiry,
+      ...getJwtClaimOptions(),
+    }
+  );
+};
 
 /**
  * @swagger
  * /api/auth/signin:
  *   post:
- *     summary: Sign in with a local account
- *     description: Username or email and password. Answers the profile of GET /api/user with the session JWT as access_token, the shared UI's backend session shape. Refused 403 while local accounts are off.
+ *     summary: Sign in user
+ *     description: Authenticate a user or service account and return JWT token
  *     tags: [Authentication]
  *     requestBody:
  *       required: true
@@ -101,26 +194,101 @@ const regenerate = req =>
  *         application/json:
  *           schema:
  *             type: object
- *             required: [username, password]
+ *             required:
+ *               - username
+ *               - password
  *             properties:
  *               username:
  *                 type: string
- *                 description: The username or the email address
+ *                 description: Username, email address or service account name
  *               password:
  *                 type: string
+ *                 format: password
+ *                 description: Password or service account token
  *               stay_logged_in:
  *                 type: boolean
+ *                 description: Whether to extend token expiration time
+ *                 default: false
  *     responses:
  *       200:
- *         description: Signed in
+ *         description: Successful authentication
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 id:
+ *                   type: integer
+ *                   description: User ID
+ *                 username:
+ *                   type: string
+ *                   description: Username
+ *                 email:
+ *                   type: string
+ *                   format: email
+ *                   description: User email (null for service accounts)
+ *                 verified:
+ *                   type: boolean
+ *                   description: Email verification status (null for service accounts)
+ *                 email_hash:
+ *                   type: string
+ *                   description: Hashed email for Gravatar (null for service accounts)
+ *                 roles:
+ *                   type: array
+ *                   items:
+ *                     type: string
+ *                   description: User roles
+ *                 organization:
+ *                   type: string
+ *                   nullable: true
+ *                   description: Name of the primary organization; a service account's own organization
+ *                 organizations:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/Membership'
+ *                   description: Every membership in the identity provider's shape, the same list the token's organizations claim carries; a service account answers its one organization at its effective role as primary, none once its creator left it
+ *                 access_token:
+ *                   type: string
+ *                   description: JWT access token
+ *                 is_service_account:
+ *                   type: boolean
+ *                   description: Whether this is a service account
+ *                 avatar_url:
+ *                   type: string
+ *                   nullable: true
+ *                   description: Stored avatar URL from the identity provider (null for service accounts or when unset; clients fall back to the email_hash gravatar)
+ *                 entitlements:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       value:
+ *                         type: string
+ *                       type:
+ *                         type: string
+ *                       display:
+ *                         type: string
+ *                   description: RFC 7643 entitlements pushed by SCIM (empty array for service accounts or when none are stored)
  *       401:
- *         description: Invalid credentials
+ *         description: Invalid credentials or expired service account
  *         content:
  *           application/problem+json:
  *             schema:
  *               $ref: '#/components/schemas/Problem'
  *       403:
- *         description: Local accounts are off
+ *         description: Local authentication is off, or the account is suspended or unverified
+ *         content:
+ *           application/problem+json:
+ *             schema:
+ *               $ref: '#/components/schemas/Problem'
+ *       422:
+ *         description: The username or password is missing
+ *         content:
+ *           application/problem+json:
+ *             schema:
+ *               $ref: '#/components/schemas/Problem'
+ *       500:
+ *         description: Internal server error
  *         content:
  *           application/problem+json:
  *             schema:
@@ -128,142 +296,90 @@ const regenerate = req =>
  */
 export const signin = async (req, res) => {
   try {
-    const { authentication } = loadConfig('auth');
-    if (authentication.local_enabled === false) {
-      return forbidden(req, res, 'auth.localAuthDisabled');
-    }
+    const authConfig = loadConfig('auth');
     const { username, password, stay_logged_in: stayLoggedIn } = req.body || {};
-    if (!username || !password) {
-      return unauthenticated(req, res, 'auth.invalidCredentials');
-    }
-    const found = await UserModel.withScope('withPassword').findByIdentifier(username);
-    if (!found) {
-      return unauthenticated(req, res, 'auth.invalidCredentials');
-    }
-    const bcrypt = (await import('bcrypt')).default;
-    if (!(await bcrypt.compare(password, found.password_hash))) {
-      return unauthenticated(req, res, 'auth.invalidCredentials');
-    }
-    await found.update({ last_login: new Date() });
-    if (req.session) {
-      await regenerate(req);
-      req.session.userId = found.id;
-    }
-    const user = await loadUser(found.id);
-    return res.json(await signinAnswer(user, req, 'local', stayLoggedIn));
-  } catch (error) {
-    log.auth.error('Sign-in error', { error: error.message });
-    return problem(res, req, { status: 500, type: 'internal' });
-  }
-};
 
-/**
- * @swagger
- * /api/auth/oidc/exchange:
- *   post:
- *     summary: Redeem the single-use code of an OIDC callback for the session JWT
- *     tags: [Authentication]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required: [code]
- *             properties:
- *               code:
- *                 type: string
- *     responses:
- *       200:
- *         description: The session JWT as token
- *       401:
- *         description: Unknown, spent or expired code
- *         content:
- *           application/problem+json:
- *             schema:
- *               $ref: '#/components/schemas/Problem'
- */
-export const exchange = async (req, res) => {
-  purgeCodes();
-  const entry = codes.get(req.body?.code);
-  if (!entry) {
-    return unauthenticated(req, res, 'auth.unauthorized');
-  }
-  codes.delete(req.body.code);
-  const user = await loadUser(entry.userId);
-  if (!user || user.is_active === false) {
-    return unauthenticated(req, res, 'auth.unauthorized');
-  }
-  return res.json({ token: mintSession(user, entry.provider, true) });
-};
+    // First, try to find a regular user
+    let user = await findSigninUser(username);
+    let isServiceAccount = false;
 
-/**
- * @swagger
- * /api/auth/refresh-token:
- *   post:
- *     summary: Refresh the session JWT
- *     description: Answers the sign-in shape with a new access_token; the identity provider tokens of a federated session are refreshed by the OIDC refresh middleware before this answers.
- *     tags: [Authentication]
- *     security:
- *       - sessionAuth: []
- *     responses:
- *       200:
- *         description: Refreshed
- *       401:
- *         description: No session
- *         content:
- *           application/problem+json:
- *             schema:
- *               $ref: '#/components/schemas/Problem'
- */
-export const refreshToken = async (req, res) => {
-  try {
-    const user = await loadUser(req.userId);
+    // If no user found, check for a service account
     if (!user) {
-      return unauthenticated(req, res, 'auth.unauthorized');
-    }
-    const stayLoggedIn = req.body?.stay_logged_in ?? req.tokenClaims?.stay_logged_in;
-    return res.json(await signinAnswer(user, req, req.authProvider, stayLoggedIn));
-  } catch (error) {
-    log.auth.error('Refresh error', { error: error.message });
-    return problem(res, req, { status: 500, type: 'internal' });
-  }
-};
+      const serviceAccount = await findSigninServiceAccount(username, password);
 
-/**
- * @swagger
- * /api/auth/oidc/logout:
- *   post:
- *     summary: Sign out everywhere
- *     description: Revokes every session JWT of the user, revokes the identity provider grant of a federated session, destroys the server-side session and answers the identity provider's end-session URL as redirect_url when it offers one.
- *     tags: [Authentication]
- *     security:
- *       - sessionAuth: []
- *     responses:
- *       200:
- *         description: Signed out
- */
-export const oidcLogout = async (req, res) => {
-  try {
-    const userId = req.user?.userId;
-    const sessionOidc = req.session?.oidc;
-    if (userId) {
-      await UserModel.update({ sessions_invalid_after: new Date() }, { where: { id: userId } });
-      notifySessionTerminated(userId);
+      if (serviceAccount) {
+        // expiresAt: null = never expires
+        if (serviceAccount.expiresAt && new Date() > serviceAccount.expiresAt) {
+          return unauthenticated(req, res, 'auth.serviceAccountExpired');
+        }
+        // Service accounts impersonate their owning user — a suspended owner
+        // may not sign in through their API keys either.
+        if (serviceAccount.user?.suspended) {
+          return forbidden(req, res, 'auth.accountSuspended');
+        }
+        await touchServiceAccount(serviceAccount.id);
+        user = serviceAccount;
+        isServiceAccount = true;
+      } else {
+        // Uniform response for unknown username and wrong password (no enumeration)
+        return unauthenticated(req, res, 'auth.invalidCredentials');
+      }
     }
-    let redirectUrl = null;
-    if (sessionOidc?.provider && sessionOidc.userId === userId) {
-      await revokeOidcGrant(sessionOidc);
-      redirectUrl = buildRpLogoutUrl(sessionOidc);
+
+    if (!isServiceAccount) {
+      const rejection = getLocalSigninRejection(user, password, authConfig, req);
+      if (rejection) {
+        return problem(res, req, rejection);
+      }
     }
-    if (req.session) {
-      await new Promise(resolve => {
-        req.session.destroy(() => resolve());
-      });
-    }
-    return res.json({ success: true, redirect_url: redirectUrl });
-  } catch (error) {
-    log.auth.error('Logout error', { error: error.message });
-    return res.json({ success: true, redirect_url: null });
+
+    const { userOrganizations, primaryOrgName } = await resolveSigninOrganizations(
+      user,
+      isServiceAccount
+    );
+
+    const provider = resolveSigninProvider(user, isServiceAccount);
+    const token = buildSigninToken({
+      user,
+      isServiceAccount,
+      stayLoggedIn,
+      provider,
+      userOrganizations,
+      authConfig,
+    });
+
+    const authorities = isServiceAccount
+      ? ['ROLE_SERVICE_ACCOUNT']
+      : user.roles.map(role => `ROLE_${role.name.toUpperCase()}`);
+
+    return res.status(200).send({
+      id: user.id,
+      username: user.username,
+      name: isServiceAccount ? null : user.name || null,
+      preferred_language: isServiceAccount ? null : user.preferredLanguage || null,
+      preferred_mode: isServiceAccount ? null : user.preferredMode || null,
+      preferred_theme: isServiceAccount ? null : user.preferredTheme || null,
+      preferred_motion: isServiceAccount ? null : user.preferredMotion || null,
+      email: isServiceAccount ? null : user.email,
+      verified: isServiceAccount ? null : user.verified,
+      email_hash: isServiceAccount ? null : user.emailHash,
+      roles: authorities,
+      role: hostRoleOf(authorities, userOrganizations),
+      organization: primaryOrgName,
+      organizations: userOrganizations, // All orgs for frontend
+      access_token: token,
+      is_service_account: isServiceAccount,
+      provider,
+      stay_logged_in: !!stayLoggedIn,
+      avatar_url: isServiceAccount ? null : user.avatar_url,
+      entitlements: isServiceAccount ? [] : user.entitlements || [],
+    });
+  } catch (err) {
+    log.error.error('Error in signin:', err);
+    return problem(res, req, {
+      status: 500,
+      type: 'internal',
+      title: req.__('auth.signinError'),
+    });
   }
 };

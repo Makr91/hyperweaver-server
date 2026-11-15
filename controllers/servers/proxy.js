@@ -5,8 +5,52 @@ import { log } from '../../utils/Logger.js';
 import { serverCache, CACHE_TTL } from './cache.js';
 import { filterProxyResponse, stampCreatedMachine } from '../../utils/orgAccess.js';
 import { decorateMachinesResponse } from '../../utils/orgVisibility.js';
+import { extractOidcAccessToken } from '../favorites/helpers.js';
+import { agentSubPath } from '../../utils/agentPath.js';
 
-const { server: ServerModel } = db;
+const { server: ServerModel, user: UserModel, organization: OrganizationModel } = db;
+
+const DEFAULTS_PATH = 'machines/defaults';
+const SERVER_SOURCES = ['user', 'organization'];
+
+/**
+ * The agent's `machines/defaults` body with the rows this server holds ahead
+ * of the agent's own in `settings.domain_choices`: `user`, the person's
+ * default domain preference, and `organization`, the base domain of the
+ * person's primary organization; a row is absent while its value is empty,
+ * and the body is unchanged while neither is set or it carries no settings.
+ * @param {Object} req - Express request object
+ * @param {*} body - The agent's answer
+ * @returns {Promise<*>} The body
+ */
+const withDomainChoices = async (req, body) => {
+  if (!body?.settings || typeof body.settings !== 'object') {
+    return body;
+  }
+  const user = await UserModel.findByPk(req.userId, {
+    attributes: ['defaultDomain', 'primary_organization_id'],
+  });
+  const organization = user?.primary_organization_id
+    ? await OrganizationModel.findByPk(user.primary_organization_id, {
+        attributes: ['base_domain'],
+      })
+    : null;
+  const rows = [
+    { source: 'user', domain: user?.defaultDomain },
+    { source: 'organization', domain: organization?.base_domain },
+  ].filter(row => row.domain);
+  if (rows.length === 0) {
+    return body;
+  }
+  const listed = Array.isArray(body.settings.domain_choices) ? body.settings.domain_choices : [];
+  return {
+    ...body,
+    settings: {
+      ...body.settings,
+      domain_choices: [...rows, ...listed.filter(row => !SERVER_SOURCES.includes(row?.source))],
+    },
+  };
+};
 
 /**
  * Resolve an agent by registry id (dual-mode plan §4.1). Id-keyed cache avoids the
@@ -22,7 +66,7 @@ export const getAgentById = async id => {
     return cached.server;
   }
 
-  const server = await ServerModel.withScope('withApiKey').findByPk(parseInt(id));
+  const server = await ServerModel.scope('withApiKey').findByPk(parseInt(id));
   serverCache.set(cacheKey, { server, timestamp: Date.now() });
   return server;
 };
@@ -218,11 +262,30 @@ export const detectFileOperation = (req, path) => {
 export const buildCleanHeaders = req => {
   const cleanHeaders = {};
   for (const [key, value] of Object.entries(req.headers)) {
-    if (!['host', 'authorization', 'cookie'].includes(key.toLowerCase())) {
+    if (!['host', 'authorization', 'cookie', 'x-registry-token'].includes(key.toLowerCase())) {
       cleanHeaders[key] = value;
     }
   }
   return cleanHeaders;
+};
+
+const REGISTRY_READ = /^templates\/remote\/[^/]+(?:\/[^/]+\/[^/]+)?$/;
+
+/**
+ * The person's identity provider access token as `x-registry-token` on a
+ * proxied `GET templates/remote/{source}` or `templates/remote/{source}/{org}/{box}`,
+ * the agent sending it to the registry ahead of any credential of its own;
+ * nothing on any other path or for a session without one.
+ * @param {Object} req - Express request object
+ * @param {string} path - The agent path
+ * @returns {Object} The header to add, or none
+ */
+export const registryTokenHeader = (req, path) => {
+  if (req.method !== 'GET' || !REGISTRY_READ.test(path)) {
+    return {};
+  }
+  const token = extractOidcAccessToken(req);
+  return token ? { 'x-registry-token': token } : {};
 };
 
 /**
@@ -274,6 +337,9 @@ export const proxyStandardRequest = async (req, res, proxyConfig, fileOpInfo) =>
     let responseBody = filterProxyResponse(req, result.data);
     if (req.orgAccess?.decorateMachines) {
       responseBody = await decorateMachinesResponse(req, server.id, responseBody);
+    }
+    if (req.method === 'GET' && path === DEFAULTS_PATH) {
+      responseBody = await withDomainChoices(req, responseBody);
     }
     return res.status(result.status || 200).json(responseBody);
   }
@@ -332,9 +398,7 @@ export const proxyStandardRequest = async (req, res, proxyConfig, fileOpInfo) =>
 export const proxyToAgent = async (req, res) => {
   try {
     const { id } = req.params;
-    const path = Array.isArray(req.params.splat)
-      ? req.params.splat.join('/')
-      : req.params.splat || '';
+    const path = agentSubPath(req);
 
     const server = await getAgentById(id);
     if (!server || !server.api_key) {
@@ -350,7 +414,7 @@ export const proxyToAgent = async (req, res) => {
 
     const { hostname, port, protocol } = server;
     const fileOpInfo = detectFileOperation(req, path);
-    const cleanHeaders = buildCleanHeaders(req);
+    const cleanHeaders = { ...buildCleanHeaders(req), ...registryTokenHeader(req, path) };
     const startTime = Date.now();
     const proxyConfig = { cleanHeaders, hostname, port, protocol, path, startTime, server };
 

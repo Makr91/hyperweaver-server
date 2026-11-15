@@ -118,10 +118,20 @@ const getI18nConfig = () => {
 };
 
 /**
- * The public origin of this server, frontend.frontend_url
+ * The sites map entry of one hostname, or null for the unnamed hostname
+ * @param {string} hostname - The request's hostname
+ * @returns {Object|null} The site entry
+ */
+const getSiteConfig = hostname => loadConfig('app').sites?.[hostname] || null;
+
+/**
+ * The origin of one hostname: the sites map entry's origin when it names one,
+ * frontend.frontend_url otherwise
+ * @param {string} hostname - The request's hostname
  * @returns {string} The origin URL
  */
-const getOrigin = () => loadConfig('app').frontend.frontend_url;
+const getOrigin = hostname =>
+  getSiteConfig(hostname)?.origin || loadConfig('app').frontend.frontend_url;
 
 export {
   CONFIG_NAMES,
@@ -135,6 +145,7 @@ export {
   reloadConfig,
   getRateLimitConfig,
   getI18nConfig,
+  getSiteConfig,
   getOrigin,
 };
 

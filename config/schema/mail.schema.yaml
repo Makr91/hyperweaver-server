@@ -1,6 +1,6 @@
 $schema: https://json-schema.org/draft/2020-12/schema
-title: Mail
-schemaVersion: 1
+title: Mail Config
+schemaVersion: 2
 sections:
   mail:
     title: Mail
@@ -9,54 +9,101 @@ properties:
   schemaVersion:
     type: integer
     readOnly: true
-    default: 1
+    default: 2
     title: Schema version
-  mail:
+  smtp_connect:
     type: object
     section: mail
-    subsection: smtpSettings
-    title: SMTP
+    subsection: smtpConnection
+    title: SMTP Connection
+    action:
+      kind: test
+      route: /api/mail/test-smtp
+      method: POST
+      body: form
+      step_up: false
+    required:
+      - host
+      - port
     properties:
-      smtp_host:
+      host:
         type: string
-        default: localhost
-        title: SMTP host
+        format: hostname
+        title: Host
         description: SMTP server hostname
         order: 1
-      smtp_port:
+      port:
         type: integer
         minimum: 1
         maximum: 65535
         default: 587
-        title: SMTP port
-        description: 587 for STARTTLS, 465 for SSL, 25 for plain
+        title: Port
+        description: SMTP server port
         order: 2
-      smtp_secure:
+      secure:
         type: boolean
-        default: false
-        title: Use SSL
-        description: true for SSL on port 465, false for STARTTLS on port 587
+        default: true
+        title: TLS connection
+        description: Use TLS for the connection
         order: 3
-      smtp_user:
+      reject_unauthorized:
+        type: boolean
+        default: true
+        title: Unverified certificate rejection
+        description: Reject TLS connections whose certificate cannot be verified
+        order: 4
+  smtp_settings:
+    type: object
+    section: mail
+    subsection: smtpSettings
+    title: SMTP Settings
+    required:
+      - from
+    properties:
+      from:
+        type: string
+        format: email
+        title: From address
+        description: Default sender email address
+        order: 1
+      reply_to:
         type: string
         default: ''
-        title: SMTP user
-        description: SMTP authentication username
+        title: Reply-to address
+        description: Default reply-to email address
+        order: 2
+      rate_limit:
+        type: integer
+        minimum: 1
+        default: 10
+        title: Rate limit
+        description: Maximum emails sent per second
+        order: 3
+      alert_emails:
+        type: array
+        items:
+          type: string
+          format: email
+        default: []
+        title: Alert recipients
+        description: Email addresses that receive system alerts such as low disk space
         order: 4
-      smtp_password:
+  smtp_auth:
+    type: object
+    section: mail
+    subsection: smtpAuthentication
+    title: SMTP Authentication
+    properties:
+      user:
+        type: string
+        default: ''
+        title: Username
+        description: SMTP username
+        order: 1
+      password:
         type: string
         writeOnly: true
         default: ''
-        title: SMTP password
-        description: SMTP authentication password
-        order: 5
-      smtp_from:
-        type: string
-        default: Hyperweaver <noreply@localhost>
-        title: From address
-        description: From address for outgoing mail
-        order: 6
-    required:
-      - smtp_host
-      - smtp_port
-      - smtp_from
+        title: Password
+        description: SMTP password
+        order: 2

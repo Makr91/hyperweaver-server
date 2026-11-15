@@ -1,8 +1,8 @@
 import { Router } from 'express';
-import { authenticate, requireAdmin, requireSuperAdmin } from '../auth/auth.js';
-import { oidcTokenRefresh } from '../auth/oidcTokenRefresh.js';
+import { authJwt, oidcTokenRefresh } from '../middleware/index.js';
 import ServerController from '../controllers/ServerController.js';
-import { orgAuthorizeAgent } from '../utils/orgAccess.js';
+import { orgAuthorizeAgent, requireOrgManager } from '../utils/orgAccess.js';
+import { agentSubPath } from '../utils/agentPath.js';
 import {
   getServerOrgs,
   setServerOrgs,
@@ -14,48 +14,32 @@ import { adminLimiter, apiProxyLimiter } from './limiters.js';
 
 const router = Router();
 
-router.post('/servers', adminLimiter, authenticate, requireAdmin, ServerController.addServer);
-router.get(
-  '/servers',
-  adminLimiter,
-  authenticate,
-  oidcTokenRefresh,
-  ServerController.getAllServers
-);
-router.post('/servers/test', adminLimiter, authenticate, ServerController.testServer);
+const signedIn = [oidcTokenRefresh, authJwt.verifyToken, authJwt.isUser];
+
+router.post('/servers', adminLimiter, signedIn, authJwt.isAdmin, ServerController.addServer);
+router.get('/servers', adminLimiter, signedIn, ServerController.getAllServers);
+router.post('/servers/test', adminLimiter, signedIn, ServerController.testServer);
 router.patch(
   '/servers/:serverId',
   adminLimiter,
-  authenticate,
-  requireAdmin,
+  signedIn,
+  authJwt.isAdmin,
   ServerController.updateServer
 );
 router.delete(
   '/servers/:serverId',
   adminLimiter,
-  authenticate,
-  requireAdmin,
+  signedIn,
+  authJwt.isAdmin,
   ServerController.removeServer
 );
 
-router.get('/servers/:serverId/orgs', adminLimiter, authenticate, oidcTokenRefresh, getServerOrgs);
-router.put('/servers/:serverId/orgs', adminLimiter, authenticate, oidcTokenRefresh, setServerOrgs);
-router.get(
-  '/servers/:serverId/machines/:machineName/orgs',
-  adminLimiter,
-  authenticate,
-  oidcTokenRefresh,
-  getMachineOrgs
-);
-router.put(
-  '/servers/:serverId/machines/:machineName/orgs',
-  adminLimiter,
-  authenticate,
-  oidcTokenRefresh,
-  setMachineOrgs
-);
+router.get('/servers/:serverId/orgs', adminLimiter, signedIn, getServerOrgs);
+router.put('/servers/:serverId/orgs', adminLimiter, signedIn, setServerOrgs);
+router.get('/servers/:serverId/machines/:machineName/orgs', adminLimiter, signedIn, getMachineOrgs);
+router.put('/servers/:serverId/machines/:machineName/orgs', adminLimiter, signedIn, setMachineOrgs);
 
-router.all('/boxvault/*splat', apiProxyLimiter, authenticate, oidcTokenRefresh, proxyToBoxVault);
+router.all('/boxvault/*splat', apiProxyLimiter, signedIn, proxyToBoxVault);
 
 const AGENT_SUPERADMIN_PREFIXES = ['settings', 'server/restart'];
 const AGENT_ADMIN_PREFIXES = [
@@ -75,21 +59,19 @@ const matchesAgentPrefix = (subPath, prefix) =>
   subPath === prefix || subPath.startsWith(`${prefix}/`);
 
 /**
- * Gate the sensitive agent surfaces by this server's own roles before the
- * proxy runs: settings and restart to the super-admin, host power, logs,
- * ZFS ARC, fault management, hosts file and database maintenance to an
- * admin; every other sub-path passes.
+ * Gate the sensitive agent surfaces before the proxy runs: settings and
+ * restart to a global admin, host power, logs, ZFS ARC, fault management,
+ * hosts file and database maintenance to a global admin or an owner or
+ * admin of any organization; every other sub-path passes.
  */
 const authorizeAgentSubPath = (req, res, next) => {
-  const subPath = Array.isArray(req.params.splat)
-    ? req.params.splat.join('/')
-    : req.params.splat || '';
+  const subPath = agentSubPath(req);
 
   if (AGENT_SUPERADMIN_PREFIXES.some(prefix => matchesAgentPrefix(subPath, prefix))) {
-    return requireSuperAdmin(req, res, next);
+    return authJwt.isAdmin(req, res, next);
   }
   if (AGENT_ADMIN_PREFIXES.some(prefix => matchesAgentPrefix(subPath, prefix))) {
-    return requireAdmin(req, res, next);
+    return requireOrgManager(req, res, next);
   }
   return next();
 };
@@ -97,8 +79,7 @@ const authorizeAgentSubPath = (req, res, next) => {
 router.all(
   '/agents/:id/*splat',
   apiProxyLimiter,
-  authenticate,
-  oidcTokenRefresh,
+  signedIn,
   authorizeAgentSubPath,
   orgAuthorizeAgent,
   ServerController.proxyToAgent

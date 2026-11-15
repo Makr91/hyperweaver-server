@@ -1,34 +1,32 @@
-import { DataTypes } from '@sequelize/core';
-
 /**
  * ServerOrg Model — which orgs own a registered agent. Junction shape: an agent can be
  * owned by multiple orgs; every owning org sees the whole agent (including unassigned
  * machines). org_uuid is the cross-app org identity (IdP claim uuid or local org uuid).
  */
-export default sequelize => {
+export default (sequelize, Sequelize) => {
   const ServerOrg = sequelize.define(
     'server_orgs',
     {
       id: {
-        type: DataTypes.INTEGER,
+        type: Sequelize.INTEGER,
         primaryKey: true,
         autoIncrement: true,
       },
       server_id: {
-        type: DataTypes.INTEGER,
+        type: Sequelize.INTEGER,
         allowNull: false,
-        columnName: 'server_id',
+        field: 'server_id',
         references: {
-          table: 'servers',
+          model: 'servers',
           key: 'id',
         },
         onUpdate: 'CASCADE',
         onDelete: 'CASCADE',
       },
       org_uuid: {
-        type: DataTypes.STRING(36),
+        type: Sequelize.STRING(36),
         allowNull: false,
-        columnName: 'org_uuid',
+        field: 'org_uuid',
         validate: {
           notEmpty: true,
         },
@@ -55,7 +53,8 @@ export default sequelize => {
 
   ServerOrg.associate = function (models) {
     ServerOrg.belongsTo(models.server, {
-      foreignKey: { name: 'server_id', onDelete: 'CASCADE' },
+      foreignKey: 'server_id',
+      onDelete: 'CASCADE',
       as: 'server',
     });
   };
