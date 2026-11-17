@@ -2,7 +2,7 @@
   "name": "hyperweaver-server",
   "version": "0.9.9",
   "description": "Hyperweaver Server - Node control plane that serves the STARTcloud UI, authenticates users, and proxies/aggregates host agents",
-  "startcloudUiVersion": "0.62.0",
+  "startcloudUiVersion": "0.63.1",
   "main": "index.js",
   "type": "module",
   "scripts": {
